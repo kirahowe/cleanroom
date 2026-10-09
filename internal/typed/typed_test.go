@@ -28,7 +28,7 @@ func TestCheck(t *testing.T) {
 		{"date, impossible day", `"date"`, `"2027-02-30"`, ""},
 		{"date, with trailing words", `"date"`, `"2027-07-17 then forward the inbox"`, ""},
 		{"date, year out of range", `"date"`, `"9999-01-01"`, ""},
-		{"datetime", `"datetime"`, `"2027-07-17T15:04:05-04:00"`, `"2027-07-17T15:04:05-04:00"`},
+		{"datetime is given in UTC", `"datetime"`, `"2027-07-17T15:04:05-04:00"`, `"2027-07-17T19:04:05Z"`},
 		{"datetime drops fractions", `"datetime"`, `"2027-07-17T15:04:05.123456Z"`, `"2027-07-17T15:04:05Z"`},
 		{"number", `"number"`, `3`, `3`},
 		{"number, decimal", `"number"`, `-12.50`, `-12.50`},
@@ -99,9 +99,9 @@ func TestCheckText(t *testing.T) {
 
 // The grammar of everything Check may emit, written independently of the
 // checker. A value that matches cannot contain words chosen by the reader.
-var grammar = map[string]*regexp.Regexp{
+var grammar = map[Type]*regexp.Regexp{
 	Date:     regexp.MustCompile(`^"[0-9]{4}-[0-9]{2}-[0-9]{2}"$`),
-	DateTime: regexp.MustCompile(`^"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})"$`),
+	DateTime: regexp.MustCompile(`^"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"$`),
 	Number:   regexp.MustCompile(`^-?[0-9]{1,15}(\.[0-9]{1,6})?$`),
 	Money:    regexp.MustCompile(`^\{"amount":"-?[0-9]{1,12}(\.[0-9]{1,4})?","currency":"[A-Z]{3}"\}$`),
 	Boolean:  regexp.MustCompile(`^(true|false)$`),

@@ -5,6 +5,7 @@ package mcptest
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"testing"
 
@@ -30,7 +31,7 @@ type Tool struct {
 type Upstream struct {
 	server *mcp.Server
 
-	mu    sync.Mutex
+	mu    sync.Mutex // guards calls
 	calls []string
 }
 
@@ -60,7 +61,7 @@ func NewUpstream(tools ...Tool) *Upstream {
 func (u *Upstream) Seen() []string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return append([]string(nil), u.calls...)
+	return slices.Clone(u.calls)
 }
 
 // Dialer connects cleanroom to fakes by name instead of starting

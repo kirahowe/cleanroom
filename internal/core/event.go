@@ -217,6 +217,15 @@ func CheckLog(log []Event) error {
 	return nil
 }
 
+// AskAt returns the ask recorded at seq, if that event is one.
+func AskAt(log []Event, seq int) (*Decided, bool) {
+	c, ok := callAt(log, seq)
+	if !ok || c.Call.Op != OpAsk {
+		return nil, false
+	}
+	return c, true
+}
+
 // callAt returns the call recorded at seq, if there is one.
 func callAt(log []Event, seq int) (*Decided, bool) {
 	if seq < 1 || seq > len(log) || log[seq-1].Kind != KindCall {

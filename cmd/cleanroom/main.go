@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -43,7 +44,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	terminal := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-	os.Exit(run(ctx, os.Args[1:], stdio{in: os.Stdin, out: os.Stdout, err: os.Stderr, terminal: terminal}))
+	os.Exit(run(ctx, os.Args[1:], stdio{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, terminal: terminal}))
 }
 
 // command is one subcommand. It registers its flags on fs and returns the
@@ -68,75 +69,87 @@ var commands = []command{
 
 // stdio is where a command reads and writes.
 type stdio struct {
-	in       io.Reader
-	out, err io.Writer
-	// terminal reports whether a person is at the other end of both in
-	// and out.
+	stdin          io.Reader
+	stdout, stderr io.Writer
+	// terminal reports whether a person is at the other end of both
+	// stdin and stdout.
 	terminal bool
 }
 
 // common holds what every command needs.
 type common struct {
+	stdio
 	policyPath string
 	stateDir   string
-	stdin      io.Reader
-	stdout     io.Writer
-	stderr     io.Writer
-	terminal   bool
+}
+
+// state is a loaded policy and the open log that goes with it.
+type state struct {
+	cfg *config.Config
+	// dir is the absolute path of the state directory. It is absolute
+	// because readers are started in another directory and are handed
+	// this path.
+	dir string
+	log *eventlog.Log
 }
 
 // open loads the policy and opens the log. The state directory defaults to
 // .cleanroom next to the policy file.
-func (c *common) open() (*config.Config, *eventlog.Log, error) {
+func (c *common) open() (*state, error) {
 	if c.policyPath == "" {
-		return nil, nil, fmt.Errorf("no policy file: pass --policy or set CLEANROOM_POLICY")
+		return nil, errors.New("no policy file: pass --policy or set CLEANROOM_POLICY")
 	}
 	cfg, err := config.Load(c.policyPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if c.stateDir == "" {
-		c.stateDir = filepath.Join(cfg.Dir, ".cleanroom")
+	dir := c.stateDir
+	if dir == "" {
+		dir = filepath.Join(cfg.Dir, ".cleanroom")
 	}
-	// Absolute, because readers are started in another directory and are
-	// handed this path.
-	if c.stateDir, err = filepath.Abs(c.stateDir); err != nil {
-		return nil, nil, err
+	if dir, err = filepath.Abs(dir); err != nil {
+		return nil, err
 	}
-	events, err := eventlog.Open(c.stateDir)
+	elog, err := eventlog.Open(dir)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return cfg, events, nil
+	return &state{cfg: cfg, dir: dir, log: elog}, nil
 }
 
-func run(ctx context.Context, args []string, io stdio) int {
-	stdout, stderr := io.out, io.err
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		usage(stderr)
+func run(ctx context.Context, args []string, sio stdio) int {
+	if len(args) == 0 {
+		usage(sio.stderr)
 		return 2
+	}
+	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		usage(sio.stdout)
+		return 0
 	}
 	for _, cmd := range commands {
 		if cmd.name != args[0] {
 			continue
 		}
-		c := &common{stdin: io.in, stdout: stdout, stderr: stderr, terminal: io.terminal}
+		c := &common{stdio: sio}
 		fs := flag.NewFlagSet("cleanroom "+cmd.name, flag.ContinueOnError)
-		fs.SetOutput(stderr)
+		fs.SetOutput(sio.stderr)
 		fs.StringVar(&c.policyPath, "policy", os.Getenv("CLEANROOM_POLICY"), "path to the policy file")
 		fs.StringVar(&c.stateDir, "state", os.Getenv("CLEANROOM_STATE"), "state directory (default: .cleanroom next to the policy)")
 		runCmd := cmd.setup(fs, c)
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			return 2
 		}
 		if err := runCmd(ctx); err != nil {
-			fmt.Fprintf(stderr, "cleanroom %s: %v\n", cmd.name, err)
+			fmt.Fprintf(sio.stderr, "cleanroom %s: %v\n", cmd.name, err)
 			return 1
 		}
 		return 0
 	}
-	fmt.Fprintf(stderr, "cleanroom: unknown command %q\n\n", args[0])
-	usage(stderr)
+	fmt.Fprintf(sio.stderr, "cleanroom: unknown command %q\n\n", args[0])
+	usage(sio.stderr)
 	return 2
 }
 

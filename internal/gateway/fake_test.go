@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 
@@ -23,7 +24,7 @@ type world struct {
 	fakes  map[string]*mcptest.Upstream
 	g      Gateway // template: Session is set per agent
 
-	mu      sync.Mutex
+	mu      sync.Mutex // guards notices
 	notices []Notice
 }
 
@@ -35,7 +36,7 @@ func (w *world) useReader(fn reader.Func) {
 func (w *world) noticed() []Notice {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return append([]Notice(nil), w.notices...)
+	return slices.Clone(w.notices)
 }
 
 // injection is what the fake inbox returns for every message. No test may

@@ -22,11 +22,11 @@ type Status struct {
 	ContaminatedBy []string `json:"contaminated_by,omitempty"`
 	PrivateBy      []string `json:"private_by,omitempty"`
 	// Held lists the session's calls that needed the person's approval.
-	Held []HeldCall `json:"held,omitempty"`
+	Held []HeldStatus `json:"held,omitempty"`
 }
 
-// HeldCall is one held call of the session and where it stands.
-type HeldCall struct {
+// HeldStatus is one held call of the session and where it stands.
+type HeldStatus struct {
 	Proposal int         `json:"proposal"`
 	Tool     string      `json:"tool"`
 	Status   core.Status `json:"status"`
@@ -49,23 +49,23 @@ func (g *Gateway) addStatus(s *mcp.Server) {
 }
 
 func (g *Gateway) status() (Status, error) {
-	log, err := g.Log.Read()
+	events, err := g.Log.Read()
 	if err != nil {
 		return Status{}, err
 	}
-	state := core.StateOf(g.Policy, log, g.Session)
+	state := core.StateOf(g.Policy, events, g.Session)
 	st := Status{
 		Session:        g.Session,
 		Labels:         state.Labels,
-		ContaminatedBy: describe(log, state.ContaminatedBy),
-		PrivateBy:      describe(log, state.PrivateBy),
+		ContaminatedBy: describe(events, state.ContaminatedBy),
+		PrivateBy:      describe(events, state.PrivateBy),
 	}
 	if state.Labels.Private && len(state.PrivateBy) == 0 {
 		st.PrivateBy = []string{"the policy marks every session private from the start"}
 	}
-	for _, pr := range core.Proposals(log) {
+	for _, pr := range core.Proposals(events) {
 		if pr.Call.Call.Session == g.Session {
-			st.Held = append(st.Held, HeldCall{
+			st.Held = append(st.Held, HeldStatus{
 				Proposal: pr.Seq,
 				Tool:     pr.Call.Call.Upstream + "." + pr.Call.Call.Tool,
 				Status:   pr.Status,
@@ -76,10 +76,10 @@ func (g *Gateway) status() (Status, error) {
 }
 
 // describe names each event in seqs in a few words written by cleanroom.
-func describe(log []core.Event, seqs []int) []string {
+func describe(events []core.Event, seqs []int) []string {
 	var out []string
 	for _, seq := range seqs {
-		out = append(out, fmt.Sprintf("event %d: %s", seq, core.Summarize(log, seq)))
+		out = append(out, fmt.Sprintf("event %d: %s", seq, core.Summarize(events, seq)))
 	}
 	return out
 }

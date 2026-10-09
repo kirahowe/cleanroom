@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"cleanroom/internal/core"
 )
@@ -70,7 +71,7 @@ func TestDirectReadContaminatesAndLaterActsAreHeld(t *testing.T) {
 
 	var st Status
 	call(t, cs, "status", nil, &st)
-	want := []HeldCall{{Proposal: held.Proposal, Tool: "mail.send", Status: core.Pending}}
+	want := []HeldStatus{{Proposal: held.Proposal, Tool: "mail.send", Status: core.Pending}}
 	if diff := cmp.Diff(want, st.Held); diff != "" {
 		t.Errorf("status held (-want +got):\n%s", diff)
 	}
@@ -123,15 +124,17 @@ func TestParallelCallsCannotSlipPast(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
+			tool := "calendar_create_event"
 			if i == 10 {
-				call(t, cs, "mail_search", nil, nil)
-				return
+				tool = "mail_search"
 			}
-			call(t, cs, "calendar_create_event", nil, nil)
-		}()
+			// Not the call helper: it may call t.Fatal, which is only
+			// allowed on the test's own goroutine.
+			if _, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: tool}); err != nil {
+				t.Error(err)
+			}
+		})
 	}
 	wg.Wait()
 

@@ -109,15 +109,13 @@ func TestConcurrentApprovalsRunTheCallOnce(t *testing.T) {
 	var mu sync.Mutex
 	wins := 0
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := d.Approve(context.Background(), held, hash, "test"); err == nil {
 				mu.Lock()
 				wins++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if wins != 1 || len(mail.Seen()) != 1 {

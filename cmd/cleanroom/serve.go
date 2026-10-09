@@ -21,10 +21,11 @@ func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	session := fs.String("session", os.Getenv("CLEANROOM_SESSION"),
 		"id of the conversation this server belongs to; reuse it when the conversation is resumed")
 	return func(ctx context.Context) error {
-		cfg, events, err := c.open()
+		st, err := c.open()
 		if err != nil {
 			return err
 		}
+		cfg := st.cfg
 		if *session == "" {
 			*session = newSessionID()
 			fmt.Fprintf(c.stderr, "cleanroom: no --session given, using %s. "+
@@ -32,13 +33,14 @@ func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		}
 		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir))
 		defer upstreams.Close()
-		readers, err := commandReaders(cfg, c.stateDir)
+		readers, err := commandReaders(cfg, st.dir)
 		if err != nil {
 			return err
 		}
 		g := &gateway.Gateway{
-			Policy: cfg.Policy, Log: events, Session: *session,
+			Policy: cfg.Policy, Log: st.log, Session: *session,
 			Upstreams: upstreams, Readers: readers,
+			Logf: log.Printf,
 		}
 		server, err := g.Server(ctx)
 		if err != nil {

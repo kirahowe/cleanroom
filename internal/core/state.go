@@ -79,21 +79,12 @@ func SourceLabels(p Policy, log []Event, upstream string) Labels {
 	return labels
 }
 
-// answerTo returns the answer recorded for the ask at seq, if any.
-func answerTo(log []Event, askSeq int) (*Answer, bool) {
-	for _, e := range log {
-		if e.Kind == KindAnswer && e.Answer.Ref == askSeq {
-			return e.Answer, true
-		}
-	}
-	return nil, false
-}
-
 // AnswerTo returns the answer recorded for the ask at seq, if any.
 func AnswerTo(log []Event, askSeq int) (Answer, bool) {
-	a, ok := answerTo(log, askSeq)
-	if !ok {
-		return Answer{}, false
+	for _, e := range log {
+		if e.Kind == KindAnswer && e.Answer.Ref == askSeq {
+			return *e.Answer, true
+		}
 	}
-	return *a, true
+	return Answer{}, false
 }

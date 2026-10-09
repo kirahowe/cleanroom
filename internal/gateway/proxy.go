@@ -3,8 +3,8 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -78,22 +78,24 @@ func classNote(class core.Class, t core.Tool) string {
 // callTool is the path every upstream call takes: decide and record, then
 // act, then record the result.
 func (g *Gateway) callTool(ctx context.Context, c core.Call) *mcp.CallToolResult {
-	seq, c, d, err := g.decide(c)
+	rec, err := g.decide(c)
 	if err != nil {
 		// A call that cannot be recorded is not made.
 		return errorResult("cleanroom could not record this call, so it was not made: " + err.Error())
 	}
+	c, d := rec.Call.Call, rec.Call.Decision
 	switch d.Verdict {
 	case core.Run:
 	case core.Hold:
-		g.needsPerson(Notice{Kind: "proposal", Seq: seq})
-		return g.heldResult(seq, d)
+		g.needsPerson(Notice{Kind: HeldCall, Seq: rec.Seq})
+		return g.heldResult(rec.Seq, d)
 	default:
 		return refusedResult(d)
 	}
 
+	// From here on, use only the call as it was recorded.
 	res, err := g.Upstreams.Call(ctx, c.Upstream, c.Tool, c.Args)
-	g.record(core.Event{Kind: core.KindResult, Result: &core.Result{Ref: seq, OK: err == nil && !res.IsError}})
+	g.record(core.Event{Kind: core.KindResult, Result: &core.Result{Ref: rec.Seq, OK: err == nil && !res.IsError}})
 	if err != nil {
 		return errorResult(fmt.Sprintf("%s.%s failed: %v", c.Upstream, c.Tool, err))
 	}
@@ -102,17 +104,17 @@ func (g *Gateway) callTool(ctx context.Context, c core.Call) *mcp.CallToolResult
 
 // decide sanitizes a call, asks the core what to do with it, and records
 // the call with the decision, as one atomic step on the shared log. It
-// returns the call as recorded, which is the one to carry out.
-func (g *Gateway) decide(c core.Call) (seq int, _ core.Call, d core.Decision, err error) {
+// returns the recorded event, which holds the call as stored, the decision
+// and the event's Seq. The stored call is the one to carry out.
+func (g *Gateway) decide(c core.Call) (core.Event, error) {
 	c = core.Sanitize(c)
-	added, err := g.Log.Update(func(log []core.Event) ([]core.Event, error) {
-		d = core.Decide(g.Policy, log, c)
-		return []core.Event{core.Record(g.Policy, log, c, d)}, nil
+	added, err := g.Log.Update(func(events []core.Event) ([]core.Event, error) {
+		return []core.Event{core.Record(g.Policy, events, c, core.Decide(g.Policy, events, c))}, nil
 	})
 	if err != nil {
-		return 0, c, core.Decision{}, err
+		return core.Event{}, err
 	}
-	return added[0].Seq, c, d, nil
+	return added[0], nil
 }
 
 // record appends an event that needs no decision. A failure is reported
@@ -152,14 +154,14 @@ func refusedResult(d core.Decision) *mcp.CallToolResult {
 
 // explain renders a decision's reasons, naming the events they cite.
 func (g *Gateway) explain(d core.Decision) []string {
-	log, err := g.Log.Read()
+	events, err := g.Log.Read()
 	if err != nil {
-		log = nil
+		events = nil // the reasons still stand without their citations
 	}
 	var out []string
 	for _, r := range d.Reasons {
 		text := r.Text
-		if cited := describe(log, r.Events); len(cited) > 0 {
+		if cited := describe(events, r.Events); len(cited) > 0 {
 			text += " (" + strings.Join(cited, "; ") + ")"
 		}
 		out = append(out, text+".")
@@ -168,10 +170,5 @@ func (g *Gateway) explain(d core.Decision) []string {
 }
 
 func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return slices.Clip(keys)
+	return slices.Sorted(maps.Keys(m))
 }

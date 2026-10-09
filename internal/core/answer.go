@@ -13,11 +13,11 @@ import (
 // A non-empty failure means the reader produced nothing usable (it crashed
 // or ran out of time), and is recorded as the detail.
 func Conclude(p Policy, log []Event, askSeq int, raw []byte, failure string) (Event, error) {
-	ask, ok := callAt(log, askSeq)
-	if !ok || ask.Call.Op != OpAsk || ask.Decision.Verdict != Run {
+	ask, ok := AskAt(log, askSeq)
+	if !ok || ask.Decision.Verdict != Run {
 		return Event{}, fmt.Errorf("%d is not an ask that was allowed", askSeq)
 	}
-	if _, answered := answerTo(log, askSeq); answered {
+	if _, answered := AnswerTo(log, askSeq); answered {
 		return Event{}, fmt.Errorf("ask %d has already been answered", askSeq)
 	}
 	spec, err := typed.ParseSpec(ask.Call.Returns)

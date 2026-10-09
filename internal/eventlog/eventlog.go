@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -67,7 +68,7 @@ func (l *Log) Update(fn func(log []core.Event) ([]core.Event, error)) ([]core.Ev
 	}
 	defer f.Close() // also releases the lock
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lock(f); err != nil {
 		return nil, fmt.Errorf("locking %s: %w", l.path, err)
 	}
 
@@ -106,22 +107,35 @@ func (l *Log) Update(fn func(log []core.Event) ([]core.Event, error)) ([]core.Ev
 	return added, nil
 }
 
+// lock takes an exclusive lock on f, waiting for it. A signal can interrupt
+// the wait, in which case it is simply tried again.
+func lock(f *os.File) error {
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if err != syscall.EINTR {
+			return err
+		}
+	}
+}
+
 // read parses the whole file. A log that does not parse or is not sound is
 // an error, never a shorter log: dropping events could drop the one that
 // contaminated a session.
 func read(f *os.File) ([]core.Event, error) {
 	var log []core.Event
-	sc := bufio.NewScanner(f)
-	sc.Buffer(nil, 16<<20)
-	for sc.Scan() {
+	// A Decoder, not a line scanner: it has no limit on the size of one
+	// event, so no event that was written can make the log unreadable.
+	dec := json.NewDecoder(bufio.NewReader(f))
+	for {
 		var e core.Event
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			return nil, fmt.Errorf("line %d is not an event: %w", len(log)+1, err)
+		err := dec.Decode(&e)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("event %d does not parse: %w", len(log)+1, err)
 		}
 		log = append(log, e)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
 	}
 	if err := core.CheckLog(log); err != nil {
 		return nil, err

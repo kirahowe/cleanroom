@@ -35,6 +35,12 @@ type Command struct {
 	//	{question}    the caller's question
 	//	{returns}     the wanted type, as JSON
 	//	{source}      the name of the source
+	//
+	// A placeholder is replaced inside one argument, once, and never
+	// passes through a shell. The question is the caller's text, so give
+	// it its own flag ("--question", "{question}") or put it after "--".
+	// A bare "{question}" would let a question that starts with a dash
+	// be read as an option of the reader program.
 	Argv []string
 	// Dir is the working directory for the command.
 	Dir string
@@ -114,7 +120,12 @@ func (c *capped) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// lineLogger passes a reader's stderr to logf a line at a time.
+// maxLogLine bounds one line of a reader's stderr.
+const maxLogLine = 8 << 10
+
+// lineLogger passes a reader's stderr to logf a line at a time. A line
+// longer than maxLogLine is logged in pieces, so a reader that never prints
+// a newline cannot make cleanroom hold its output.
 type lineLogger struct {
 	logf func(format string, args ...any)
 	rest []byte
@@ -127,8 +138,11 @@ func (l *lineLogger) Write(p []byte) (int, error) {
 	l.rest = append(l.rest, p...)
 	for {
 		line, rest, found := bytes.Cut(l.rest, []byte("\n"))
-		if !found {
+		if !found && len(l.rest) < maxLogLine {
 			break
+		}
+		if !found {
+			line, rest = l.rest[:maxLogLine], l.rest[maxLogLine:]
 		}
 		l.logf("reader: %s", string(line))
 		l.rest = rest

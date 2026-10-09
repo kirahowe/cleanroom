@@ -21,28 +21,54 @@ type Dialer func(ctx context.Context, name string, up core.Upstream) (*mcp.Clien
 
 // Set is the upstream servers of a policy, connected on first use.
 //
-// The connections and the tool lists are the only mutable state here. They
-// are guarded by mu and carry no decisions: what a session may do is never
-// cached.
+// The connections and tool lists are the only mutable state here, and
+// they carry no decisions: what a session may do is never cached.
 type Set struct {
-	policy core.Policy
-	dial   Dialer
+	dial Dialer
+	// servers has one entry per upstream in the policy. The map is
+	// fixed once New returns. Each entry guards its own state, so a
+	// slow upstream holds up nobody else.
+	servers map[string]*server
+}
 
-	mu    sync.Mutex
-	conns map[string]*mcp.ClientSession
-	tools map[string][]*mcp.Tool
+// server is one upstream and its lazily made connection.
+type server struct {
+	name string
+	up   core.Upstream
+
+	// connect dials the upstream and lists its tools, once. The list is
+	// kept for good, so a server cannot change a tool's annotations
+	// partway through a session to get a different class.
+	connect func() (*connection, error)
+}
+
+type connection struct {
+	session *mcp.ClientSession
+	tools   []*mcp.Tool
 }
 
 // New returns the upstreams of a policy. Nothing is started until an
 // upstream is first used.
 func New(p core.Policy, dial Dialer) *Set {
-	return &Set{policy: p, dial: dial, conns: map[string]*mcp.ClientSession{}, tools: map[string][]*mcp.Tool{}}
+	s := &Set{dial: dial, servers: map[string]*server{}}
+	for name, up := range p.Upstreams {
+		srv := &server{name: name, up: up}
+		// The connection outlives whichever call happened to make it,
+		// so it is not tied to that call's context.
+		srv.connect = sync.OnceValues(func() (*connection, error) {
+			return s.open(context.Background(), srv)
+		})
+		s.servers[name] = srv
+	}
+	return s
 }
 
 // CommandDialer starts each upstream as a child process, with dir as its
 // working directory, and speaks MCP over its stdin and stdout.
 func CommandDialer(dir string) Dialer {
 	return func(ctx context.Context, name string, up core.Upstream) (*mcp.ClientSession, error) {
+		// Not CommandContext: the process must outlive the call that
+		// started it. Close stops it.
 		cmd := exec.Command(up.Command[0], up.Command[1:]...)
 		cmd.Dir = dir
 		cmd.Stderr = os.Stderr
@@ -55,68 +81,60 @@ func CommandDialer(dir string) Dialer {
 	}
 }
 
-func (s *Set) conn(ctx context.Context, name string) (*mcp.ClientSession, error) {
-	up, ok := s.policy.Upstreams[name]
+func (s *Set) open(ctx context.Context, srv *server) (*connection, error) {
+	cs, err := s.dial(ctx, srv.name, srv.up)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to upstream %q: %w", srv.name, err)
+	}
+	c := &connection{session: cs}
+	for tool, err := range cs.Tools(ctx, nil) {
+		if err != nil {
+			cs.Close()
+			return nil, fmt.Errorf("listing tools of %q: %w", srv.name, err)
+		}
+		c.tools = append(c.tools, tool)
+	}
+	return c, nil
+}
+
+func (s *Set) conn(name string) (*connection, error) {
+	srv, ok := s.servers[name]
 	if !ok {
 		return nil, fmt.Errorf("no upstream named %q", name)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if cs, ok := s.conns[name]; ok {
-		return cs, nil
-	}
-	cs, err := s.dial(ctx, name, up)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to upstream %q: %w", name, err)
-	}
-	s.conns[name] = cs
-	return cs, nil
+	return srv.connect()
 }
 
-// Tools lists the tools an upstream offers. The list is fetched once and
-// kept, so a server cannot change a tool's annotations partway through a
-// session to get a different class.
+// Tools lists the tools an upstream offers, as they were when it was
+// first connected.
 func (s *Set) Tools(ctx context.Context, name string) ([]*mcp.Tool, error) {
-	cs, err := s.conn(ctx, name)
+	c, err := s.conn(name)
 	if err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if tools, ok := s.tools[name]; ok {
-		return tools, nil
-	}
-	var tools []*mcp.Tool
-	for tool, err := range cs.Tools(ctx, nil) {
-		if err != nil {
-			return nil, fmt.Errorf("listing tools of %q: %w", name, err)
-		}
-		tools = append(tools, tool)
-	}
-	s.tools[name] = tools
-	return tools, nil
+	return c.tools, nil
 }
 
 // Call calls a tool on an upstream. The gateway calls this only after
 // core.Decide has allowed the call.
 func (s *Set) Call(ctx context.Context, name, tool string, args json.RawMessage) (*mcp.CallToolResult, error) {
-	cs, err := s.conn(ctx, name)
+	c, err := s.conn(name)
 	if err != nil {
 		return nil, err
 	}
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	return cs.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+	return c.session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 }
 
-// Close disconnects from every upstream and stops the ones it started.
+// Close disconnects from every upstream that was connected and stops the
+// ones it started. The Set must not be used afterwards.
 func (s *Set) Close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for name, cs := range s.conns {
-		cs.Close()
-		delete(s.conns, name)
+	for _, srv := range s.servers {
+		if c, err := srv.connect(); err == nil {
+			c.session.Close()
+		}
 	}
 }
 

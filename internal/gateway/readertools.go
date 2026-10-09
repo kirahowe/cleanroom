@@ -19,15 +19,14 @@ import (
 // counts is in core.Decide, which every call below goes through under the
 // reader's own session and which refuses anything else.
 type readerTools struct {
-	g      *Gateway // its Session is the reader's session
-	source string
+	g       *Gateway
+	session string // the reader's own session, not the gateway's
+	source  string
 }
 
 // forReader returns the tools for the reader of the ask at askSeq.
 func (g *Gateway) forReader(askSeq int, source string) readerTools {
-	rg := *g
-	rg.Session = core.ReaderSession(askSeq)
-	return readerTools{g: &rg, source: source}
+	return readerTools{g: g, session: core.ReaderSession(askSeq), source: source}
 }
 
 func (r readerTools) List(ctx context.Context) ([]*mcp.Tool, error) {
@@ -58,7 +57,7 @@ func (r readerTools) Call(ctx context.Context, tool string, args json.RawMessage
 		}
 	}
 	return r.g.callTool(ctx, core.Call{
-		Session: r.g.Session, Op: core.OpTool,
+		Session: r.session, Op: core.OpTool,
 		Upstream: r.source, Tool: tool, Args: args, Hint: hint,
 	}), nil
 }
@@ -67,14 +66,15 @@ func (r readerTools) Call(ctx context.Context, tool string, args json.RawMessage
 // program connects to. It offers the read-only tools of the source of the
 // ask at askSeq, under their own names, and nothing else.
 func (g *Gateway) ReaderServer(ctx context.Context, askSeq int) (*mcp.Server, error) {
-	log, err := g.Log.Read()
+	events, err := g.Log.Read()
 	if err != nil {
 		return nil, err
 	}
-	if askSeq < 1 || askSeq > len(log) || log[askSeq-1].Kind != core.KindCall || log[askSeq-1].Call.Call.Op != core.OpAsk {
+	ask, ok := core.AskAt(events, askSeq)
+	if !ok {
 		return nil, fmt.Errorf("%d is not an ask", askSeq)
 	}
-	rt := g.forReader(askSeq, log[askSeq-1].Call.Call.Upstream)
+	rt := g.forReader(askSeq, ask.Call.Upstream)
 	tools, err := rt.List(ctx)
 	if err != nil {
 		return nil, err

@@ -112,9 +112,7 @@ func TestConcurrentWriters(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			l, err := Open(dir)
 			if err != nil {
 				t.Error(err)
@@ -131,11 +129,14 @@ func TestConcurrentWriters(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
-	l, _ := Open(dir)
+	l, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	log, err := l.Read()
 	if err != nil {
 		t.Fatal(err)

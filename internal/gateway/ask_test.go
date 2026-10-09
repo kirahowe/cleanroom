@@ -112,7 +112,7 @@ func TestFreeTextIsDeliveredToThePerson(t *testing.T) {
 	if got := w.labels("chief"); got != (core.Labels{}) {
 		t.Errorf("caller labels = %v, want clean", got)
 	}
-	if diff := cmp.Diff([]Notice{{Kind: "answer", Seq: res.ID}}, w.noticed()); diff != "" {
+	if diff := cmp.Diff([]Notice{{Kind: AnswerWaiting, Seq: res.ID}}, w.noticed()); diff != "" {
 		t.Errorf("notices (-want +got):\n%s", diff)
 	}
 }

@@ -123,7 +123,7 @@ func cleanroom(t *testing.T, args ...string) *exec.Cmd {
 func runCLI(t *testing.T, terminal bool, stdin string, args ...string) (stdout string, ok bool) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := run(context.Background(), args, stdio{in: strings.NewReader(stdin), out: &out, err: &errOut, terminal: terminal})
+	code := run(context.Background(), args, stdio{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errOut, terminal: terminal})
 	return out.String() + errOut.String(), code == 0
 }
 

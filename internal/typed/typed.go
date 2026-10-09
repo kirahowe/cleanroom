@@ -17,22 +17,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"time"
 	"unicode/utf8"
 )
 
-// The types a caller can ask for.
+// Type names a kind of answer a caller can ask for.
+type Type string
+
 const (
-	Date     = "date"     // a calendar day, YYYY-MM-DD
-	DateTime = "datetime" // an instant, RFC 3339
-	Number   = "number"   // a plain decimal number
-	Money    = "money"    // an amount and an ISO 4217 currency code
-	Boolean  = "boolean"  // true or false
-	Choice   = "choice"   // one of the strings the caller listed
-	Record   = "record"   // named fields, each of one of the types above
-	Text     = "text"     // free text: never returned as a typed value
+	Date     Type = "date"     // a calendar day, YYYY-MM-DD
+	DateTime Type = "datetime" // an instant, RFC 3339, in UTC
+	Number   Type = "number"   // a plain decimal number
+	Money    Type = "money"    // an amount and an ISO 4217 currency code
+	Boolean  Type = "boolean"  // true or false
+	Choice   Type = "choice"   // one of the strings the caller listed
+	Record   Type = "record"   // named fields, each of one of the types above
+	Text     Type = "text"     // free text: never returned as a typed value
 )
 
 // Limits on what a caller may ask for and what a reader may send back.
@@ -48,7 +51,7 @@ const (
 
 // Spec is the type of answer a caller wants from ask.
 type Spec struct {
-	Type    string          `json:"type"`
+	Type    Type            `json:"type"`
 	Choices []string        `json:"choices,omitempty"` // for Choice
 	Fields  map[string]Spec `json:"fields,omitempty"`  // for Record
 }
@@ -64,7 +67,7 @@ var fieldName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 func (s *Spec) UnmarshalJSON(raw []byte) error {
 	var name string
 	if json.Unmarshal(raw, &name) == nil {
-		*s = Spec{Type: name}
+		*s = Spec{Type: Type(name)}
 		return nil
 	}
 	type plain Spec // drops this method, so decoding does not recurse forever
@@ -210,8 +213,9 @@ func check(spec Spec, v any) (string, bool) {
 		if err != nil || !yearInRange(t) {
 			return "", false
 		}
-		// Whole seconds only: fractional digits are free bits.
-		return quote(t.Truncate(time.Second).Format(time.RFC3339)), true
+		// Whole seconds, in UTC. Fractional digits and the choice of
+		// offset would be free bits for a reader to signal with.
+		return quote(t.UTC().Truncate(time.Second).Format(time.RFC3339)), true
 
 	case Number:
 		n, ok := v.(json.Number)
@@ -268,11 +272,7 @@ func check(spec Spec, v any) (string, bool) {
 				return "", false
 			}
 		}
-		names := make([]string, 0, len(spec.Fields))
-		for name := range spec.Fields {
-			names = append(names, name)
-		}
-		sort.Strings(names)
+		names := slices.Sorted(maps.Keys(spec.Fields))
 
 		var b bytes.Buffer
 		answered := false

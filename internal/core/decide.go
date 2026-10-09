@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"unicode/utf8"
 
 	"cleanroom/internal/typed"
@@ -28,6 +29,15 @@ type Decision struct {
 	Reasons []Reason `json:"reasons"`
 	// Gains is what the session takes on when the call takes effect.
 	Gains Labels `json:"gains"`
+}
+
+// Equal reports whether two decisions are the same. A decision read back
+// from the log compares equal to the one that was written.
+func (d Decision) Equal(o Decision) bool {
+	return d.Verdict == o.Verdict && d.Class == o.Class && d.Gains == o.Gains &&
+		slices.EqualFunc(d.Reasons, o.Reasons, func(a, b Reason) bool {
+			return a.Text == b.Text && slices.Equal(a.Events, b.Events)
+		})
 }
 
 // Reason is one sentence of explanation, with the Seq of each event that
@@ -185,11 +195,10 @@ func decideAsk(p Policy, log []Event, c Call) Decision {
 }
 
 func decideReadAnswer(p Policy, log []Event, c Call) Decision {
-	ask, ok := callAt(log, c.Answer)
-	if !ok || ask.Call.Op != OpAsk {
+	if _, ok := AskAt(log, c.Answer); !ok {
 		return refuse(fmt.Sprintf("%d is not an ask", c.Answer))
 	}
-	ans, ok := answerTo(log, c.Answer)
+	ans, ok := AnswerTo(log, c.Answer)
 	if !ok {
 		return refuse(fmt.Sprintf("ask %d has not been answered yet", c.Answer))
 	}
@@ -218,11 +227,11 @@ func decideReadAnswer(p Policy, log []Event, c Call) Decision {
 // the tools of the one source it was started for, and only tools that
 // cannot change anything or, if the source is private, send anything out.
 func decideReader(p Policy, log []Event, c Call, askSeq int) Decision {
-	ask, ok := callAt(log, askSeq)
-	if !ok || ask.Call.Op != OpAsk || ask.Decision.Verdict != Run {
+	ask, ok := AskAt(log, askSeq)
+	if !ok || ask.Decision.Verdict != Run {
 		return refuse("this reader does not belong to an ask that was allowed")
 	}
-	if _, answered := answerTo(log, askSeq); answered {
+	if _, answered := AnswerTo(log, askSeq); answered {
 		return refuse("this reader's ask has already been answered")
 	}
 	if c.Op != OpTool {

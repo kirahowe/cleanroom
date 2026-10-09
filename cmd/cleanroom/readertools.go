@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"log"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -20,13 +21,13 @@ func readerToolsCommand(fs *flag.FlagSet, c *common) func(context.Context) error
 		if *ask == 0 {
 			return errors.New("--ask is required")
 		}
-		cfg, log, err := c.open()
+		st, err := c.open()
 		if err != nil {
 			return err
 		}
-		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir))
+		upstreams := upstream.New(st.cfg.Policy, upstream.CommandDialer(st.cfg.Dir))
 		defer upstreams.Close()
-		g := &gateway.Gateway{Policy: cfg.Policy, Log: log, Upstreams: upstreams}
+		g := &gateway.Gateway{Policy: st.cfg.Policy, Log: st.log, Upstreams: upstreams, Logf: log.Printf}
 		server, err := g.ReaderServer(ctx, *ask)
 		if err != nil {
 			return err

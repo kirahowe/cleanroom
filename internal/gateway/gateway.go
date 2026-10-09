@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -45,27 +44,30 @@ type Gateway struct {
 	// held, or an answer is waiting for them. It is the one place to
 	// attach a notifier. If nil, the notice is logged.
 	Notify func(Notice)
-	// Logf logs operational messages. If nil, log.Printf is used, which
-	// writes to stderr. Stdout belongs to the protocol.
+	// Logf logs operational messages. If nil, they are discarded.
 	Logf func(format string, args ...any)
 }
 
 func (g *Gateway) logf(format string, args ...any) {
 	if g.Logf != nil {
 		g.Logf(format, args...)
-		return
 	}
-	log.Printf(format, args...)
 }
 
 // Notice says that something needs the person's attention.
 type Notice struct {
-	// Kind is "proposal" for a held call or "answer" for a free-text
-	// answer waiting to be read.
-	Kind string
+	Kind NoticeKind
 	// Seq identifies it on the command line: cleanroom show <Seq>.
 	Seq int
 }
+
+// NoticeKind says what is waiting for the person.
+type NoticeKind string
+
+const (
+	HeldCall      NoticeKind = "proposal" // a call is held for approval
+	AnswerWaiting NoticeKind = "answer"   // a free-text answer is waiting to be read
+)
 
 // needsPerson is the single place where "this needs a person" is raised.
 func (g *Gateway) needsPerson(n Notice) {
