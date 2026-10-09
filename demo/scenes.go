@@ -41,7 +41,7 @@ func (d *demo) tripCost(a *agent) {
 	d.check(string(res.Value) == `{"amount":"890.55","currency":"CAD"}`,
 		"the four receipts add up to 890.55 CAD")
 	d.check(d.labels() == core.Labels{Private: true},
-		"the agent's session is %s: it holds a private fact and has read no mail", d.labels())
+		"the agent's session is %s and not contaminated: it has read no mail", d.labels())
 }
 
 func (d *demo) reunionAndOrder(a *agent) {
@@ -52,7 +52,7 @@ func (d *demo) reunionAndOrder(a *agent) {
 	// The date came from the reader as a typed value. The title is the
 	// agent's own words. Nothing in the event was copied from the email.
 	out := a.call("calendar_create_event", map[string]any{"title": "Family reunion", "date": "2027-07-17"}, nil)
-	fmt.Printf("  agent   received %s\n", oneLine(out))
+	fmt.Printf("  agent   received %q\n", oneLine(out))
 	ics, _ := os.ReadFile(filepath.Join(d.state, "calendar", "calendar.ics"))
 	d.check(strings.Contains(string(ics), "SUMMARY:Family reunion") && strings.Contains(string(ics), "DTSTART;VALUE=DATE:20270717"),
 		"the event ran with no approval and is in calendar.ics")
@@ -136,6 +136,11 @@ func (d *demo) heldSends(a *agent) {
 	scene(6, "After a restart, the contaminated session tries to send mail")
 	d.check(d.labels().Contaminated, "the restarted session did not come back clean")
 
+	// A Mailpit left running from an earlier run already holds that
+	// run's message, so count from where the inbox stands now.
+	sentBefore, _ := sentTo("orders@northbound.example")
+	leakedBefore, _ := sentTo("archive@evil.example")
+
 	var reply, leak struct {
 		Status   string `json:"status"`
 		Proposal int    `json:"proposal"`
@@ -152,7 +157,7 @@ func (d *demo) heldSends(a *agent) {
 	}, &leak)
 	d.check(reply.Status == "held" && leak.Status == "held", "both sends are held as proposals %d and %d", reply.Proposal, leak.Proposal)
 	sent, _ := sentTo("orders@northbound.example")
-	d.check(sent == 0, "nothing has been sent yet")
+	d.check(sent == sentBefore, "nothing has been sent yet")
 
 	fmt.Printf("\n  The person sees this with `cleanroom show %d`. Every line comes from the log:\n\n", leak.Proposal)
 	d.showToPerson(func(log []core.Event) (string, error) { return approval.Screen(d.cfg.Policy, log, leak.Proposal) })
@@ -180,7 +185,8 @@ func (d *demo) heldSends(a *agent) {
 
 	sent, _ = sentTo("orders@northbound.example")
 	leaked, _ := sentTo("archive@evil.example")
-	d.check(sent == 1 && leaked == 0, "Mailpit holds exactly one message to the supplier and none to evil.example")
+	d.check(sent == sentBefore+1 && leaked == leakedBefore,
+		"Mailpit received exactly one message to the supplier and none to evil.example")
 }
 
 // showToPerson prints a screen that cleanroom would only show at a

@@ -4,6 +4,11 @@
 //
 // Commands run with this file's directory as their working directory.
 {
+	// The agent this policy is for holds its user's notes, which cleanroom
+	// cannot see. So every session counts as private from the start, and a
+	// session that becomes contaminated cannot send data out unapproved.
+	"sessions_start_private": true,
+
 	"upstreams": {
 		// The inbox is the hard case: private, and anyone can put text in it.
 		"mail": {
@@ -23,9 +28,10 @@
 			"tools": {
 				"search": {"class": "read"},
 				"read": {"class": "read"},
-				// Sending acts for the user. Its result is only a status
-				// line, so receiving it does not contaminate the caller.
-				"send": {"class": "act", "labels": []},
+				// Sending acts for the user. Cleanroom discards what the
+				// tool returns and tells the caller only whether it ran, so
+				// sending does not contaminate the caller.
+				"send": {"class": "act", "discard_result": true},
 			},
 		},
 
@@ -36,8 +42,8 @@
 			"command": ["../bin/calendar-source", "--dir", ".cleanroom/calendar"],
 			"labels": [],
 			"tools": {
-				"create_event": {"class": "act"},
-				"create_reminder": {"class": "act"},
+				"create_event": {"class": "act", "discard_result": true},
+				"create_reminder": {"class": "act", "discard_result": true},
 			},
 		},
 	},
