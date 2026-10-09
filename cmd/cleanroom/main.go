@@ -3,7 +3,8 @@
 //
 // Usage:
 //
-//	cleanroom serve [flags]    run the MCP server on stdin and stdout
+//	cleanroom serve [flags]          run the MCP server on stdin and stdout
+//	cleanroom reader-tools --ask N   serve one reader's tools (started by cleanroom)
 //
 // Every command takes --policy and --state, which default to the
 // CLEANROOM_POLICY and CLEANROOM_STATE environment variables.
@@ -42,6 +43,7 @@ type command struct {
 
 var commands = []command{
 	{"serve", "run the MCP server on stdin and stdout", serveCommand},
+	{"reader-tools", "serve one reader's tools on stdin and stdout (started by cleanroom)", readerToolsCommand},
 }
 
 // common holds what every command needs.
@@ -64,6 +66,11 @@ func (c *common) open() (*config.Config, *eventlog.Log, error) {
 	}
 	if c.stateDir == "" {
 		c.stateDir = filepath.Join(cfg.Dir, ".cleanroom")
+	}
+	// Absolute, because readers are started in another directory and are
+	// handed this path.
+	if c.stateDir, err = filepath.Abs(c.stateDir); err != nil {
+		return nil, nil, err
 	}
 	events, err := eventlog.Open(c.stateDir)
 	if err != nil {
@@ -105,7 +112,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: cleanroom <command> [flags]")
 	fmt.Fprintln(w)
 	for _, cmd := range commands {
-		fmt.Fprintf(w, "  %-12s %s\n", cmd.name, cmd.summary)
+		fmt.Fprintf(w, "  %-13s %s\n", cmd.name, cmd.summary)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Run cleanroom <command> -h for a command's flags.")
