@@ -11,7 +11,7 @@ or needs an API key, and no mail leaves the machine.
 
 ```sh
 go version      # needs Go 1.25 or later
-make test       # about 30 seconds: every test in the three Go modules
+make test       # under a minute: every test in the three Go modules
 make demo       # about 10 seconds after the first build: six scenes, 22 checks
 ```
 

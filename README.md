@@ -343,10 +343,12 @@ arrangement the paragraph above warns against.
   itself. The terminal check on `show` and `approve` stops accidents and the
   casual case. It is not a boundary. A real one needs the agent in a sandbox
   or under another user, or the approval moved to another device.
-- A typed value can be wrong. It can also carry a few bits: a compromised
-  reader chooses which valid date to return, and the id of an ask reveals how
-  many calls earlier readers made. That is a covert channel to an agent that
-  is not listening for one, not an injection.
+- A typed value can be wrong. It can also carry bits: a compromised reader
+  chooses which valid value to return. A date holds about 17 bits, a number
+  about 71, and a record of sixteen numbers about 140 bytes
+  (`TestCapacity` counts them). The id of an ask also reveals how many calls
+  earlier readers made, up to their budget of 40. That is a covert channel to
+  an agent that is not listening for one, not an injection.
 - An upstream's tool names, descriptions and schemas are passed to the agent
   as they are. They come from the server's code, which the policy trusts, not
   from its content. A remote server that could change them would need more
@@ -377,8 +379,10 @@ arrangement the paragraph above warns against.
 - Reading a message through Mailpit's API marks it as read. The IMAP back end
   that would avoid this is not built yet.
 - The log is a plain file that is read in full on each decision. That is
-  fine for a person's assistant and would not be for a busy service. It is
-  not protected against tampering by a process running as you.
+  fine for a person's assistant and would not be for a busy service. Damage
+  inside it is detected and stops everything. It has no checksum, so it is
+  not protected against tampering by a process running as you, and a log cut
+  off cleanly at the end of a line reads as a shorter log.
 - Unix only: the log is locked with `flock`.
 
 ## Not built yet
