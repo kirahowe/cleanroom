@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"cleanroom/internal/gateway"
+	"cleanroom/internal/upstream"
 )
 
 func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
@@ -26,7 +27,9 @@ func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			fmt.Fprintf(c.stderr, "cleanroom: no --session given, using %s. "+
 				"If this conversation is resumed in a new process it will start clean; pass --session to prevent that.\n", *session)
 		}
-		g := &gateway.Gateway{Policy: cfg.Policy, Log: log, Session: *session}
+		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir))
+		defer upstreams.Close()
+		g := &gateway.Gateway{Policy: cfg.Policy, Log: log, Session: *session, Upstreams: upstreams}
 		server, err := g.Server(ctx)
 		if err != nil {
 			return err

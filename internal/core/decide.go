@@ -80,7 +80,7 @@ func decideTool(p Policy, log []Event, c Call) Decision {
 	if !ok {
 		return refuse(fmt.Sprintf("there is no upstream named %q", c.Upstream))
 	}
-	class, ok := classOf(up, c)
+	class, ok := ClassOf(up, c.Tool, c.Hint)
 	if !ok {
 		return refuse(fmt.Sprintf("tool %q has no class: the policy has no entry for it and the server gave no usable annotations", c.Tool))
 	}
@@ -116,13 +116,14 @@ func decideTool(p Policy, log []Event, c Call) Decision {
 	return d
 }
 
-// classOf resolves a tool's class: the policy entry if there is one,
-// otherwise the hint taken from the server's annotations.
-func classOf(up Upstream, c Call) (Class, bool) {
-	if t, ok := up.Tools[c.Tool]; ok && t.Class != "" {
+// ClassOf resolves a tool's class: the policy entry if there is one,
+// otherwise the hint taken from the server's annotations. It reports false
+// when neither gives a class, and such a tool is refused.
+func ClassOf(up Upstream, tool string, hint Class) (Class, bool) {
+	if t, ok := up.Tools[tool]; ok && t.Class != "" {
 		return t.Class, t.Class.valid()
 	}
-	return c.Hint, c.Hint.valid()
+	return hint, hint.valid()
 }
 
 // resultLabels is what the result of a tool call carries.
@@ -234,7 +235,7 @@ func decideReader(p Policy, log []Event, c Call, askSeq int) Decision {
 	if !ok {
 		return refuse(fmt.Sprintf("there is no upstream named %q", c.Upstream))
 	}
-	class, ok := classOf(up, c)
+	class, ok := ClassOf(up, c.Tool, c.Hint)
 	if !ok {
 		return refuse(fmt.Sprintf("tool %q has no class", c.Tool))
 	}

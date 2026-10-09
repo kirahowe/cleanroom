@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -24,6 +25,8 @@ import (
 )
 
 func main() {
+	log.SetFlags(0)
+	log.SetPrefix("cleanroom: ")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
@@ -62,11 +65,11 @@ func (c *common) open() (*config.Config, *eventlog.Log, error) {
 	if c.stateDir == "" {
 		c.stateDir = filepath.Join(cfg.Dir, ".cleanroom")
 	}
-	log, err := eventlog.Open(c.stateDir)
+	events, err := eventlog.Open(c.stateDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cfg, log, nil
+	return cfg, events, nil
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
