@@ -31,7 +31,7 @@ func (o *oracle) took(p Policy, c Call, class Class) {
 	if c.Op != OpTool {
 		return
 	}
-	if class != Read && o.exposed[c.Session] {
+	if (class == Write || class == Act) && o.exposed[c.Session] {
 		o.dirty[c.Upstream] = true
 	}
 	if !p.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult && o.untrusted(p, c.Upstream) {

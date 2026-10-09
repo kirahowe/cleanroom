@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"regexp"
 	"slices"
@@ -177,7 +178,12 @@ func decode(raw []byte) (any, bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var v any
-	if err := dec.Decode(&v); err != nil || dec.More() {
+	if err := dec.Decode(&v); err != nil {
+		return nil, false
+	}
+	// Nothing may follow the value. (dec.More is not enough: it reports
+	// false before a stray closing bracket.)
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, false
 	}
 	return v, true

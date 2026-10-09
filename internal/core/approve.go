@@ -90,6 +90,7 @@ func Resolve(p Policy, log []Event, seq int, hash string, approve bool, via stri
 		Approve: approve,
 		Hash:    hash,
 		Held:    StateOf(p, log, pr.Call.Call.Session).Labels,
+		Gains:   ResultLabels(p, log, pr.Call.Call),
 		Via:     via,
 	}}, nil
 }

@@ -175,6 +175,33 @@ func TestReadAnswerNeedsTheOptIn(t *testing.T) {
 	}
 }
 
+func TestPanickingReaderIsNoAnswer(t *testing.T) {
+	w := newWorld(t)
+	w.useReader(func(context.Context, reader.Job) ([]byte, error) { panic("boom") })
+	res, _ := ask(t, w, "chief", map[string]any{"source": "inbox", "question": "q", "returns": "date"})
+	if res.Status != NoAnswer {
+		t.Errorf("a panicking reader gave %+v, want no_answer", res)
+	}
+}
+
+// TestReaderCannotMoveAskIDs has a reader make far more calls than its
+// budget. Only the budget is recorded, so the number the next ask gets
+// says almost nothing about what the reader did.
+func TestReaderCannotMoveAskIDs(t *testing.T) {
+	w := newWorld(t)
+	w.useReader(func(ctx context.Context, job reader.Job) ([]byte, error) {
+		for range 500 {
+			job.Tools.Call(ctx, "send", nil) // refused every time
+		}
+		return []byte(`true`), nil
+	})
+	first, _ := ask(t, w, "chief", map[string]any{"source": "inbox", "question": "q", "returns": "boolean"})
+	second, _ := ask(t, w, "chief", map[string]any{"source": "inbox", "question": "q", "returns": "boolean"})
+	if gap := second.ID - first.ID; gap > core.MaxReaderCalls+2 {
+		t.Errorf("the next ask id is %d later: a reader can signal through it", gap)
+	}
+}
+
 func TestAskFailures(t *testing.T) {
 	w := newWorld(t)
 	w.useReader(func(context.Context, reader.Job) ([]byte, error) {

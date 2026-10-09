@@ -66,7 +66,7 @@ func AnswerScreen(log []core.Event, seq int) (string, error) {
 	case !ok:
 		b.WriteString("No answer yet.\n")
 	case ans.Outcome == core.OutcomeNone:
-		fmt.Fprintf(&b, "No answer: %s.\n", ans.Detail)
+		fmt.Fprintf(&b, "No answer: %s.\n", visible(ans.Detail))
 	case ans.Outcome == core.OutcomeTyped:
 		fmt.Fprintf(&b, "Answer (a checked value): %s\n", visible(string(ans.Value)))
 	default:
@@ -111,6 +111,14 @@ func block(text string) string {
 	return b.String()
 }
 
+// invisible lists characters that count as printable but draw nothing, or
+// change how their neighbours are drawn: fillers, variation selectors and
+// the like.
+var invisible = []*unicode.RangeTable{
+	unicode.Other_Default_Ignorable_Code_Point,
+	unicode.Variation_Selector,
+}
+
 // visible makes every character of untrusted text show up as itself, on
 // one line. Line breaks, control characters, terminal escape sequences and
 // invisible or direction-changing characters are written out as escapes,
@@ -120,7 +128,7 @@ func visible(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case unicode.IsPrint(r):
+		case unicode.IsPrint(r) && !unicode.In(r, invisible...):
 			b.WriteRune(r)
 		case r == '\n':
 			b.WriteString(`\n`)

@@ -563,6 +563,68 @@ func TestRefusedCallsAreStoredSmallAndPrintable(t *testing.T) {
 	}
 }
 
+// TestHeldReadTakesLabelsAtApproval holds a read of a clean store, lets a
+// contaminated session write to the store, and then approves the read. The
+// reader must take on what the store carries when the read runs, not what
+// it carried when the read was first held.
+func TestHeldReadTakesLabelsAtApproval(t *testing.T) {
+	w := newWorld(t)
+	w.p.Upstreams["notes"].Tools["get"] = Tool{Class: Read, AlwaysHold: true}
+	held, d := w.tool("clean", "notes", "get")
+	wantVerdict(t, d, Hold)
+
+	w.tool("dirty", "mail", "search")
+	w.tool("dirty", "notes", "put")
+	if err := w.resolve(held, true); err != nil {
+		t.Fatal(err)
+	}
+	if !w.labels("clean").Contaminated {
+		t.Error("a read approved after a contaminated write left its session clean")
+	}
+}
+
+// TestResultIsCheckedAgainWhenItComesBack covers the same race without a
+// hold: a read is decided while the store is clean, and a contaminated
+// write is recorded before the store answers.
+func TestResultIsCheckedAgainWhenItComesBack(t *testing.T) {
+	w := newWorld(t)
+	read, d := w.tool("clean", "notes", "get")
+	wantVerdict(t, d, Run)
+	if !MayReturn(w.p, w.log, w.rec(read)) {
+		t.Fatal("a read of an untouched store may not return")
+	}
+	w.tool("dirty", "mail", "search")
+	w.tool("dirty", "notes", "put")
+	if MayReturn(w.p, w.log, w.rec(read)) {
+		t.Error("a read decided before a contaminated write may still return")
+	}
+}
+
+func TestEgressLeavesNoLabelsOnItsUpstream(t *testing.T) {
+	w := newWorld(t)
+	w.p.SessionsStartPrivate = true
+	w.tool("chief", "web", "fetch")
+	if got := SourceLabels(w.p, w.log, "web"); got.Private {
+		t.Errorf("web carries %v after one fetch by a private session; its readers could no longer fetch", got)
+	}
+}
+
+func TestArgumentsKeepTheirSizeThroughTheLog(t *testing.T) {
+	// "<" is written to the log as a six-byte escape. Sanitize has to
+	// measure and hash the stored form, or a call decided at one size
+	// would replay at another.
+	c := Sanitize(Call{Session: "chief", Op: OpTool, Upstream: "calendar", Tool: "list",
+		Args: json.RawMessage(`{"q":"` + strings.Repeat("<", 1000) + `"}`)})
+	stored, _ := json.Marshal(c)
+	var back Call
+	if err := json.Unmarshal(stored, &back); err != nil {
+		t.Fatal(err)
+	}
+	if string(back.Args) != string(c.Args) || back.Hash() != c.Hash() {
+		t.Errorf("arguments changed in the log: %d bytes before, %d after", len(c.Args), len(back.Args))
+	}
+}
+
 func TestReaderCannotUseAHeldTool(t *testing.T) {
 	w := newWorld(t)
 	w.p.Upstreams["inbox"].Tools["export"] = Tool{Class: Read, AlwaysHold: true}
@@ -584,6 +646,7 @@ func TestFaultyLogRefusesEverything(t *testing.T) {
 		"forward reference": func(l []Event) []Event {
 			return append(l, Event{Seq: 2, Kind: KindApproval, Approval: &Approval{Ref: 2, Approve: true}})
 		},
+		"a verdict that is none of the three": func(l []Event) []Event { l[0].Call.Decision.Verdict = "rul"; return l },
 		"approval of a call that was not held": func(l []Event) []Event {
 			return append(l, Event{Seq: 2, Kind: KindApproval, Approval: &Approval{Ref: 1, Approve: true}})
 		},

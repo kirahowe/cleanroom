@@ -6,9 +6,10 @@ package core
 // effect is a call that took effect: either it was allowed to run when it
 // was decided, or it was held and the person later approved it.
 type effect struct {
-	at   int      // Seq of the event at which it took effect
-	call *Decided // the call
-	held Labels   // what its session carried at that moment
+	at    int      // Seq of the event at which it took effect
+	call  *Decided // the call
+	held  Labels   // what its session carried at that moment
+	gains Labels   // what its session took on at that moment
 }
 
 // effects lists the calls in a log that took effect, in order. Refused
@@ -19,11 +20,11 @@ func effects(log []Event) []effect {
 		switch e.Kind {
 		case KindCall:
 			if e.Call.Decision.Verdict == Run {
-				out = append(out, effect{at: e.Seq, call: e.Call, held: e.Call.Held})
+				out = append(out, effect{at: e.Seq, call: e.Call, held: e.Call.Held, gains: e.Call.Decision.Gains})
 			}
 		case KindApproval:
 			if c, ok := callAt(log, e.Approval.Ref); ok && e.Approval.Approve {
-				out = append(out, effect{at: e.Seq, call: c, held: e.Approval.Held})
+				out = append(out, effect{at: e.Seq, call: c, held: e.Approval.Held, gains: e.Approval.Gains})
 			}
 		}
 	}
@@ -49,7 +50,7 @@ func StateOf(p Policy, log []Event, session string) State {
 		if ef.call.Call.Session != session {
 			continue
 		}
-		gains := ef.call.Decision.Gains
+		gains := ef.gains
 		if gains.Contaminated {
 			st.ContaminatedBy = append(st.ContaminatedBy, ef.at)
 		}
@@ -72,7 +73,11 @@ func SourceLabels(p Policy, log []Event, upstream string) Labels {
 	labels := p.Upstreams[upstream].Labels
 	for _, ef := range effects(log) {
 		c := ef.call
-		if c.Call.Op == OpTool && c.Call.Upstream == upstream && c.Decision.Class != Read {
+		// Only calls that change what the upstream holds leave labels
+		// on it. An egress call sends data out to the world. It does
+		// not put it where a later read of this upstream returns it.
+		stores := c.Decision.Class == Write || c.Decision.Class == Act
+		if c.Call.Op == OpTool && c.Call.Upstream == upstream && stores {
 			labels = labels.Union(ef.held)
 		}
 	}

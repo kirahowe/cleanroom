@@ -148,7 +148,11 @@ type Approval struct {
 	Hash    string `json:"hash"` // the Call.Hash() the person was shown
 	// Held is what the session carried when the approval was given.
 	Held Labels `json:"held"`
-	Via  string `json:"via"` // "cli", "elicitation", ...
+	// Gains is what the session takes on from the call's result, worked
+	// out when the approval was given. What the call would have gained
+	// when it was first held may be out of date by then.
+	Gains Labels `json:"gains"`
+	Via   string `json:"via"` // "cli", "elicitation", ...
 }
 
 // Delivered records that a free-text answer was shown to the person.
@@ -192,7 +196,7 @@ func CheckLog(log []Event) error {
 		ok := false
 		switch e.Kind {
 		case KindCall:
-			ok = e.Call != nil
+			ok = e.Call != nil && e.Call.Decision.Verdict.valid()
 		case KindResult:
 			if ok = e.Result != nil; ok {
 				ref, wantRef = e.Result.Ref, true

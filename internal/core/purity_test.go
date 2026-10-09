@@ -15,7 +15,7 @@ import (
 // (Package time is used only for the time.Time type and for parsing.)
 var pureImports = map[string]bool{
 	"bytes": true, "crypto/sha256": true, "encoding/hex": true, "encoding/json": true,
-	"errors": true, "fmt": true, "maps": true, "regexp": true, "slices": true, "strconv": true,
+	"errors": true, "fmt": true, "io": true, "maps": true, "regexp": true, "slices": true, "strconv": true,
 	"strings": true, "time": true, "unicode/utf8": true,
 	"cleanroom/internal/typed": true,
 }

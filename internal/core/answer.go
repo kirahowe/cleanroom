@@ -56,6 +56,15 @@ func Conclude(p Policy, log []Event, askSeq int, raw []byte, failure string) (Ev
 	return Event{Kind: KindAnswer, Answer: a}, nil
 }
 
+// MayReturn reports whether the result of the tool call c may be handed to
+// its session, given the log as it is once the upstream has answered. The
+// session took on the upstream's labels when the call was decided. If a
+// contaminated session wrote to the upstream in between, the result may
+// hold what it wrote, and the session's labels no longer cover it.
+func MayReturn(p Policy, log []Event, c Decided) bool {
+	return c.Held.Union(c.Decision.Gains).Contains(ResultLabels(p, log, c.Call))
+}
+
 // MayRelease reports whether the content of an answer may be handed to the
 // session that made the call c. The session must carry every label the
 // content carries, counting what it held before the call and what the call

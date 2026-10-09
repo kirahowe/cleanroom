@@ -51,6 +51,8 @@ func TestCheck(t *testing.T) {
 		{"null is no answer", `"date"`, `null`, ""},
 		{"not json", `"date"`, `2027-07-17`, ""},
 		{"two values", `"number"`, `1 2`, ""},
+		{"a stray bracket after the value", `"boolean"`, `true]`, ""},
+		{"a stray brace after the value", `"date"`, `"2027-07-17"}`, ""},
 		{"text never passes Check", `"text"`, `"hello"`, ""},
 	}
 	for _, tt := range tests {

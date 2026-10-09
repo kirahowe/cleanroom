@@ -20,6 +20,8 @@ const (
 	Refuse Verdict = "refuse" // never
 )
 
+func (v Verdict) valid() bool { return v == Run || v == Hold || v == Refuse }
+
 // Decision is what Decide returns. It is recorded in the log next to the
 // call it is about.
 type Decision struct {
@@ -103,7 +105,7 @@ func decideTool(p Policy, log []Event, c Call) Decision {
 	}
 
 	st := StateOf(p, log, c.Session)
-	d := Decision{Class: class, Gains: resultLabels(p, log, c)}
+	d := Decision{Class: class, Gains: ResultLabels(p, log, c)}
 	switch {
 	case up.Tools[c.Tool].AlwaysHold:
 		d.Verdict = Hold
@@ -144,9 +146,9 @@ func ClassOf(up Upstream, tool string, hint Class) (Class, bool) {
 	return hint, hint.valid()
 }
 
-// resultLabels is what the caller of a tool takes on: whatever the
+// ResultLabels is what the caller of a tool takes on: whatever the
 // upstream carries now, or nothing if cleanroom discards the result.
-func resultLabels(p Policy, log []Event, c Call) Labels {
+func ResultLabels(p Policy, log []Event, c Call) Labels {
 	if p.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult {
 		return Labels{}
 	}
@@ -326,19 +328,30 @@ func decideReader(p Policy, log []Event, c Call, askSeq int) Decision {
 	default:
 		return refuse(fmt.Sprintf("a reader of %q may not make a %s call", c.Upstream, class))
 	}
-	used := 0
-	for _, e := range log {
-		if e.Kind == KindCall && e.Call.Call.Session == c.Session {
-			used++
-		}
-	}
-	if used >= MaxReaderCalls {
+	if ReaderSpent(log, c.Session) {
 		return refuse(fmt.Sprintf("this reader has used its %d calls", MaxReaderCalls))
 	}
 	return Decision{
 		Verdict: Run, Class: class, Gains: source,
 		Reasons: []Reason{{Text: "a reader using a read tool of its own source", Events: []int{askSeq}}},
 	}
+}
+
+// ReaderSpent reports whether a reader session has used all its calls,
+// counting refused ones. The shell stops recording a spent reader's calls,
+// so that a reader cannot grow the log, or move the numbers later events
+// get, by more than its budget.
+func ReaderSpent(log []Event, session string) bool {
+	if _, ok := readerAsk(session); !ok {
+		return false
+	}
+	used := 0
+	for _, e := range log {
+		if e.Kind == KindCall && e.Call.Call.Session == session {
+			used++
+		}
+	}
+	return used >= MaxReaderCalls
 }
 
 // readerMayUse reports whether a reader may call an egress tool of its
@@ -411,6 +424,11 @@ func Sanitize(c Call) Call {
 	return c
 }
 
+// compact returns raw in the exact form the log stores it in, which is what
+// encoding/json writes for a RawMessage: no insignificant whitespace, and
+// "<", ">" and "&" escaped. Using that form from the start means the size
+// that is checked, the bytes that are hashed and the bytes that are sent
+// are the same before and after a trip through the log.
 func compact(raw json.RawMessage, limit int) (json.RawMessage, bool) {
 	if len(raw) == 0 {
 		return nil, true
@@ -418,11 +436,11 @@ func compact(raw json.RawMessage, limit int) (json.RawMessage, bool) {
 	if len(raw) > limit {
 		return nil, false
 	}
-	var b bytes.Buffer
-	if err := json.Compact(&b, raw); err != nil {
+	stored, err := json.Marshal(raw)
+	if err != nil || len(stored) > limit {
 		return nil, false
 	}
-	return b.Bytes(), true
+	return stored, true
 }
 
 // Record builds the log event for a sanitized call and its decision. The

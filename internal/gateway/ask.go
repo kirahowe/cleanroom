@@ -182,6 +182,12 @@ func (g *Gateway) runReader(ctx context.Context, seq int, c core.Call) (raw []by
 	}
 	ctx, cancel := context.WithTimeout(ctx, g.readerTimeout())
 	defer cancel()
+	// A reader that panics has failed, like one that crashed.
+	defer func() {
+		if r := recover(); r != nil {
+			raw, failure = nil, "the reader panicked"
+		}
+	}()
 	raw, err := rd.Answer(ctx, reader.Job{
 		Ask: seq, Source: c.Upstream, Question: c.Question, Returns: c.Returns,
 		Tools: g.forReader(seq, c.Upstream),

@@ -86,7 +86,12 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	var out capped
 	cmd.Stdout = &out
 	cmd.Stderr = &lineLogger{logf: c.Logf}
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	// Whatever the reader left running goes too, even after a clean exit.
+	if cmd.Process != nil {
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil, errors.New("the reader ran out of time")
 		}

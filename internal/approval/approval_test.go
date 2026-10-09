@@ -270,9 +270,10 @@ func FuzzVisible(f *testing.F) {
 	f.Add("plain")
 	f.Add("\x1b[31mred\x1b[0m\r\n\u202egnp.exe")
 	f.Add(string([]byte{0xff, 0xfe, 0x00}))
+	f.Add("a\u034fb\u115fc\ufe0fd\U000e0100e")
 	f.Fuzz(func(t *testing.T, s string) {
 		for _, r := range visible(s) {
-			if r < 0x20 || (r >= 0x7f && r < 0xa0) || !unicode.IsPrint(r) {
+			if r < 0x20 || (r >= 0x7f && r < 0xa0) || !unicode.IsPrint(r) || unicode.In(r, invisible...) {
 				t.Fatalf("visible(%q) contains %U", s, r)
 			}
 		}

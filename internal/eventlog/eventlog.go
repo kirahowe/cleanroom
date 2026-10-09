@@ -123,19 +123,25 @@ func lock(f *os.File) error {
 // contaminated a session.
 func read(f *os.File) ([]core.Event, error) {
 	var log []core.Event
-	// A Decoder, not a line scanner: it has no limit on the size of one
-	// event, so no event that was written can make the log unreadable.
-	dec := json.NewDecoder(bufio.NewReader(f))
+	// One event per line, and nothing else: a blank line or two events
+	// on a line is damage. ReadBytes has no limit on a line's length, so
+	// no event that was written can make the log unreadable.
+	r := bufio.NewReader(f)
 	for {
-		var e core.Event
-		err := dec.Decode(&e)
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			var e core.Event
+			if err := json.Unmarshal(line, &e); err != nil {
+				return nil, fmt.Errorf("line %d is not an event: %w", len(log)+1, err)
+			}
+			log = append(log, e)
+		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("event %d does not parse: %w", len(log)+1, err)
+			return nil, err
 		}
-		log = append(log, e)
 	}
 	if err := core.CheckLog(log); err != nil {
 		return nil, err

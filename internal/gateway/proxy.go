@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -108,6 +109,12 @@ func (g *Gateway) callTool(ctx context.Context, c core.Call) *mcp.CallToolResult
 	// From here on, use only the call as it was recorded.
 	res, err := g.Upstreams.Call(ctx, c.Upstream, c.Tool, c.Args)
 	g.record(core.Event{Kind: core.KindResult, Result: &core.Result{Ref: rec.Seq, OK: err == nil && !res.IsError}})
+	// The session took on the upstream's labels when the call was
+	// decided. Check that they still cover what the upstream may have
+	// returned: a contaminated session may have written to it since.
+	if events, logErr := g.Log.Read(); logErr != nil || !core.MayReturn(g.Policy, events, *rec.Call) {
+		return errorResult(fmt.Sprintf("%s.%s ran, but %s was written to while it did, so its result is withheld. Call it again.", c.Upstream, c.Tool, c.Upstream))
+	}
 	if g.Policy.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult {
 		// The caller took on no labels for this call, so it gets none
 		// of the upstream's words either, not even an error message.
@@ -129,6 +136,9 @@ func (g *Gateway) callTool(ctx context.Context, c core.Call) *mcp.CallToolResult
 func (g *Gateway) decide(c core.Call) (core.Event, error) {
 	c = core.Sanitize(c)
 	added, err := g.Log.Update(func(events []core.Event) ([]core.Event, error) {
+		if core.ReaderSpent(events, c.Session) {
+			return nil, errReaderSpent
+		}
 		return []core.Event{core.Record(g.Policy, events, c, core.Decide(g.Policy, events, c))}, nil
 	})
 	if err != nil {
@@ -136,6 +146,10 @@ func (g *Gateway) decide(c core.Call) (core.Event, error) {
 	}
 	return added[0], nil
 }
+
+// errReaderSpent stops a reader that has used its calls. Nothing more is
+// recorded for it.
+var errReaderSpent = errors.New("this reader has used all its calls")
 
 // record appends an event that needs no decision. A failure is reported
 // but does not undo an effect that has already happened.
