@@ -8,3 +8,10 @@
 
 # Credentials for real mailboxes never belong in the repository.
 *.env
+
+# What `go build` leaves behind when run inside a source's directory.
+/sources/mail/mailsource
+/sources/calendar/calendarsource
+
+# Worktrees made by coding agents.
+/.claude/

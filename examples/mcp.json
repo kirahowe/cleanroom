@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cleanroom": {
+      "command": "bin/cleanroom",
+      "args": ["serve", "--policy", "demo/policy.jsonc", "--session", "try-it"]
+    }
+  }
+}
