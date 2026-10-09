@@ -16,6 +16,7 @@ SMTP     := 127.0.0.1:11025
 build:
 	go build -o $(BIN)/cleanroom ./cmd/cleanroom
 	go build -o $(BIN)/seed ./demo/seed
+	go build -o $(BIN)/demo-reader ./demo/reader
 	cd sources/mail && go build -o ../../$(BIN)/mail-source .
 	cd sources/calendar && go build -o ../../$(BIN)/calendar-source .
 
@@ -33,5 +34,8 @@ inbox: build mailpit
 	@( sleep 1; $(BIN)/seed --api http://$(HTTP) --smtp $(SMTP) --reset ) &
 	@$(MAILPIT) --listen $(HTTP) --smtp $(SMTP) --quiet
 
+demo: build mailpit
+	@go run ./demo
+
 clean:
-	rm -rf $(BIN) .cleanroom
+	rm -rf $(BIN) demo/.cleanroom
