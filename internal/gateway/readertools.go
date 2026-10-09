@@ -1,0 +1,95 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"cleanroom/internal/core"
+	"cleanroom/internal/upstream"
+	"cleanroom/internal/version"
+)
+
+// readerTools is what the reader of one ask can reach: the tools of its
+// source that only read. It implements reader.Tools.
+//
+// Listing only those tools is a convenience for the reader. The limit that
+// counts is in core.Decide, which every call below goes through under the
+// reader's own session and which refuses anything else.
+type readerTools struct {
+	g      *Gateway // its Session is the reader's session
+	source string
+}
+
+// forReader returns the tools for the reader of the ask at askSeq.
+func (g *Gateway) forReader(askSeq int, source string) readerTools {
+	rg := *g
+	rg.Session = core.ReaderSession(askSeq)
+	return readerTools{g: &rg, source: source}
+}
+
+func (r readerTools) List(ctx context.Context) ([]*mcp.Tool, error) {
+	up := r.g.Policy.Upstreams[r.source]
+	all, err := r.g.Upstreams.Tools(ctx, r.source)
+	if err != nil {
+		return nil, err
+	}
+	var tools []*mcp.Tool
+	for _, tool := range all {
+		class, ok := core.ClassOf(up, tool.Name, upstream.Hint(tool))
+		if ok && (class == core.Read || class == core.Egress) {
+			tools = append(tools, tool)
+		}
+	}
+	return tools, nil
+}
+
+func (r readerTools) Call(ctx context.Context, tool string, args json.RawMessage) (*mcp.CallToolResult, error) {
+	all, err := r.g.Upstreams.Tools(ctx, r.source)
+	if err != nil {
+		return nil, err
+	}
+	var hint core.Class
+	for _, t := range all {
+		if t.Name == tool {
+			hint = upstream.Hint(t)
+		}
+	}
+	return r.g.callTool(ctx, core.Call{
+		Session: r.g.Session, Op: core.OpTool,
+		Upstream: r.source, Tool: tool, Args: args, Hint: hint,
+	}), nil
+}
+
+// ReaderServer builds the MCP server that a reader running as a separate
+// program connects to. It offers the read-only tools of the source of the
+// ask at askSeq, under their own names, and nothing else.
+func (g *Gateway) ReaderServer(ctx context.Context, askSeq int) (*mcp.Server, error) {
+	log, err := g.Log.Read()
+	if err != nil {
+		return nil, err
+	}
+	if askSeq < 1 || askSeq > len(log) || log[askSeq-1].Kind != core.KindCall || log[askSeq-1].Call.Call.Op != core.OpAsk {
+		return nil, fmt.Errorf("%d is not an ask", askSeq)
+	}
+	rt := g.forReader(askSeq, log[askSeq-1].Call.Call.Upstream)
+	tools, err := rt.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s := mcp.NewServer(&mcp.Implementation{Name: "cleanroom-reader-tools", Version: version.Version}, nil)
+	for _, tool := range tools {
+		s.AddTool(&mcp.Tool{
+			Name:        tool.Name,
+			Title:       tool.Title,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+			Annotations: tool.Annotations,
+		}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return rt.Call(ctx, tool.Name, req.Params.Arguments)
+		})
+	}
+	return s, nil
+}

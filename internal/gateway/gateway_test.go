@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"cleanroom/internal/core"
@@ -85,8 +86,12 @@ func TestStatusOfANewSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 1 || tools.Tools[0].Name != "status" {
-		t.Fatalf("tools = %+v, want only status", tools.Tools)
+	var names []string
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	if diff := cmp.Diff([]string{"ask", "status"}, names); diff != "" {
+		t.Fatalf("built-in tools (-want +got):\n%s", diff)
 	}
 
 	var st Status

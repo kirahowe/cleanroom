@@ -18,7 +18,7 @@ import (
 // which Decide would refuse anyway, and the read tools of an ask-only
 // source.
 func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) error {
-	taken := map[string]string{"status": "cleanroom"}
+	taken := map[string]string{"status": "cleanroom", "ask": "cleanroom", "read_answer": "cleanroom"}
 	for _, name := range sortedKeys(g.Policy.Upstreams) {
 		up := g.Policy.Upstreams[name]
 		tools, err := g.Upstreams.Tools(ctx, name)

@@ -21,20 +21,22 @@ type Dialer func(ctx context.Context, name string, up core.Upstream) (*mcp.Clien
 
 // Set is the upstream servers of a policy, connected on first use.
 //
-// The connections are the only mutable state here. They are guarded by mu
-// and carry no decisions: what a session may do is never cached.
+// The connections and the tool lists are the only mutable state here. They
+// are guarded by mu and carry no decisions: what a session may do is never
+// cached.
 type Set struct {
 	policy core.Policy
 	dial   Dialer
 
 	mu    sync.Mutex
 	conns map[string]*mcp.ClientSession
+	tools map[string][]*mcp.Tool
 }
 
 // New returns the upstreams of a policy. Nothing is started until an
 // upstream is first used.
 func New(p core.Policy, dial Dialer) *Set {
-	return &Set{policy: p, dial: dial, conns: map[string]*mcp.ClientSession{}}
+	return &Set{policy: p, dial: dial, conns: map[string]*mcp.ClientSession{}, tools: map[string][]*mcp.Tool{}}
 }
 
 // CommandDialer starts each upstream as a child process, with dir as its
@@ -71,11 +73,18 @@ func (s *Set) conn(ctx context.Context, name string) (*mcp.ClientSession, error)
 	return cs, nil
 }
 
-// Tools lists the tools an upstream offers.
+// Tools lists the tools an upstream offers. The list is fetched once and
+// kept, so a server cannot change a tool's annotations partway through a
+// session to get a different class.
 func (s *Set) Tools(ctx context.Context, name string) ([]*mcp.Tool, error) {
 	cs, err := s.conn(ctx, name)
 	if err != nil {
 		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tools, ok := s.tools[name]; ok {
+		return tools, nil
 	}
 	var tools []*mcp.Tool
 	for tool, err := range cs.Tools(ctx, nil) {
@@ -84,6 +93,7 @@ func (s *Set) Tools(ctx context.Context, name string) ([]*mcp.Tool, error) {
 		}
 		tools = append(tools, tool)
 	}
+	s.tools[name] = tools
 	return tools, nil
 }
 

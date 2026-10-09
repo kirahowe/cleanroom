@@ -13,11 +13,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"cleanroom/internal/core"
 	"cleanroom/internal/eventlog"
+	"cleanroom/internal/reader"
 	"cleanroom/internal/upstream"
 	"cleanroom/internal/version"
 )
@@ -35,6 +37,10 @@ type Gateway struct {
 	Session string
 	// Upstreams are the MCP servers behind the gateway.
 	Upstreams *upstream.Set
+	// Readers answers questions about sources, by source name.
+	Readers map[string]reader.Reader
+	// ReaderTimeout bounds one reader's run. Zero means three minutes.
+	ReaderTimeout time.Duration
 	// Notify is called whenever something needs the person: a call was
 	// held, or an answer is waiting for them. It is the one place to
 	// attach a notifier. If nil, the notice is logged.
@@ -87,6 +93,7 @@ func (g *Gateway) Server(ctx context.Context) (*mcp.Server, error) {
 		Instructions: instructions,
 	})
 	g.addStatus(s)
+	g.addAsk(s)
 	if err := g.addUpstreamTools(ctx, s); err != nil {
 		return nil, err
 	}

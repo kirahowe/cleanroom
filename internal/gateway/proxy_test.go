@@ -25,25 +25,11 @@ func TestToolsOffered(t *testing.T) {
 	}
 	slices.Sort(got)
 	// calendar_mystery is missing: it has no class, so it is not offered.
-	want := []string{"calendar_create_event", "calendar_list_events", "mail_search", "mail_send", "shady_harmless", "status"}
+	// inbox_search and inbox_read are missing too: inbox is ask_only, so
+	// only its send tool is offered.
+	want := []string{"ask", "calendar_create_event", "calendar_list_events", "inbox_send", "mail_search", "mail_send", "shady_harmless", "status"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("tools (-want +got):\n%s", diff)
-	}
-}
-
-func TestAskOnlySourceHidesItsReadTools(t *testing.T) {
-	w := newWorld(t)
-	mail := w.policy.Upstreams["mail"]
-	mail.AskOnly, mail.Reader = true, []string{"reader"}
-	w.policy.Upstreams["mail"] = mail
-	res, err := w.agent("chief").ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tool := range res.Tools {
-		if tool.Name == "mail_search" {
-			t.Error("mail_search is offered although mail is ask_only")
-		}
 	}
 }
 
