@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -21,6 +22,7 @@ const (
 	icsFile       = "calendar.ics"
 	eventsFile    = "events.json"
 	remindersFile = "reminders.json"
+	lockFile      = ".lock"
 )
 
 // ErrInvalid marks errors caused by bad caller input.
@@ -68,18 +70,48 @@ type Reminder struct {
 
 // Store keeps events and reminders in a directory. Events live in
 // events.json, and calendar.ics is regenerated from it after every change.
-// That is simpler than parsing the .ics back and loses nothing. All
-// operations hold one mutex, and files are replaced atomically.
+// That is simpler than parsing the .ics back and loses nothing.
+//
+// Several servers may share one directory, since each MCP client starts its
+// own. Every operation therefore holds a lock on a file in the directory as
+// well as the mutex, and files are replaced atomically.
 type Store struct {
 	dir   string
-	mu    sync.Mutex
 	now   func() time.Time
 	newID func() string
+
+	mu sync.Mutex // serialises operations within this process
 }
 
-// NewStore creates dir if needed and returns a Store using it.
-func NewStore(dir string) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// lock takes the store's lock, within this process and across processes.
+// The caller must call the returned function to release it.
+func (s *Store) lock() (unlock func(), err error) {
+	s.mu.Lock()
+	f, err := os.OpenFile(filepath.Join(s.dir, lockFile), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if err != syscall.EINTR {
+			break
+		}
+	}
+	if err != nil {
+		f.Close()
+		s.mu.Unlock()
+		return nil, fmt.Errorf("locking %s: %w", s.dir, err)
+	}
+	return func() {
+		f.Close() // releases the file lock
+		s.mu.Unlock()
+	}, nil
+}
+
+// newStore creates dir if needed and returns a Store using it.
+func newStore(dir string) (*Store, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	return &Store{dir: dir, now: time.Now, newID: randomID}, nil
@@ -99,8 +131,11 @@ func (s *Store) CreateEvent(in EventInput) (Event, error) {
 	if err := validateEvent(in); err != nil {
 		return Event{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return Event{}, err
+	}
+	defer unlock()
 
 	events, err := readJSON[storedEvent](filepath.Join(s.dir, eventsFile))
 	if err != nil {
@@ -122,8 +157,11 @@ func (s *Store) CreateEvent(in EventInput) (Event, error) {
 
 // ListEvents returns all events in creation order.
 func (s *Store) ListEvents() ([]Event, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	stored, err := readJSON[storedEvent](filepath.Join(s.dir, eventsFile))
 	if err != nil {
 		return nil, err
@@ -140,8 +178,11 @@ func (s *Store) CreateReminder(in ReminderInput) (Reminder, error) {
 	if err := validateReminder(in); err != nil {
 		return Reminder{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return Reminder{}, err
+	}
+	defer unlock()
 
 	reminders, err := readJSON[Reminder](s.RemindersPath())
 	if err != nil {
@@ -156,8 +197,11 @@ func (s *Store) CreateReminder(in ReminderInput) (Reminder, error) {
 
 // ListReminders returns all reminders in creation order.
 func (s *Store) ListReminders() ([]Reminder, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	return readJSON[Reminder](s.RemindersPath())
 }
 
@@ -263,7 +307,7 @@ func writeFile(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)

@@ -23,14 +23,14 @@ func main() {
 	dir := flag.String("dir", defaultDir, "directory for calendar.ics and reminders.json (env CALENDAR_DIR)")
 	flag.Parse()
 
-	store, err := NewStore(*dir)
+	store, err := newStore(*dir)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := NewServer(store).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+	if err := newServer(store).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 		log.Fatalf("server: %v", err)
 	}
 }

@@ -27,7 +27,7 @@ type listRemindersOut struct {
 type noInput struct{}
 
 // NewServer returns an MCP server exposing the store as four tools.
-func NewServer(s *Store) *mcp.Server {
+func newServer(s *Store) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "calendar-source", Version: "0.1.0"}, nil)
 
 	writes := &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)}

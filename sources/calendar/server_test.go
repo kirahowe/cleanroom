@@ -14,7 +14,7 @@ func connect(t *testing.T) (*mcp.ClientSession, *Store) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
-	ss, err := NewServer(store).Connect(ctx, st, nil)
+	ss, err := newServer(store).Connect(ctx, st, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

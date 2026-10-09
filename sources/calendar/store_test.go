@@ -13,7 +13,7 @@ import (
 // newTestStore returns a store with a fixed clock and sequential ids.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := NewStore(t.TempDir())
+	s, err := newStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestPersistsAcrossStores(t *testing.T) {
 	if _, err := s.CreateEvent(EventInput{Title: "kept", Date: "2026-03-10"}); err != nil {
 		t.Fatal(err)
 	}
-	s2, err := NewStore(s.dir)
+	s2, err := newStore(s.dir)
 	if err != nil {
 		t.Fatal(err)
 	}

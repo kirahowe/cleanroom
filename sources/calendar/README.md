@@ -35,9 +35,10 @@ if it is missing.
 | `calendar.ics` | iCalendar file, regenerated from `events.json` on every change |
 | `reminders.json` | Reminders |
 
-Writes go to a temporary file that is renamed into place, and a mutex
-serializes them, so concurrent calls do not lose entries. The server logs to
-stderr only.
+Writes go to a temporary file that is renamed into place. Each operation
+holds a lock on a `.lock` file in the directory, so several servers can share
+one directory without losing entries. The directory and its files are readable
+only by the user. The server logs to stderr only.
 
 ## Run
 
