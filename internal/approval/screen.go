@@ -9,7 +9,8 @@ package approval
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -26,8 +27,8 @@ func Screen(p core.Policy, log []core.Event, seq int) (string, error) {
 	}
 	c := pr.Call.Call
 	var b strings.Builder
-	fmt.Fprintf(&b, "Proposal %d: %s.%s   [%s]\n", seq, c.Upstream, c.Tool, pr.Status)
-	fmt.Fprintf(&b, "Asked by session %q. Class: %s.\n\n", c.Session, pr.Call.Decision.Class)
+	fmt.Fprintf(&b, "Proposal %d: %s.%s   [%s]\n", seq, visible(c.Upstream), visible(c.Tool), pr.Status)
+	fmt.Fprintf(&b, "Asked by session %q. Class: %s.\n\n", visible(c.Session), pr.Call.Decision.Class)
 
 	b.WriteString("Arguments, exactly as they will be sent:\n")
 	b.WriteString(renderArgs(c.Args))
@@ -57,8 +58,8 @@ func AnswerScreen(log []core.Event, seq int) (string, error) {
 	}
 	c := log[seq-1].Call.Call
 	var b strings.Builder
-	fmt.Fprintf(&b, "Ask %d, put to %q by session %q\n", seq, c.Upstream, c.Session)
-	fmt.Fprintf(&b, "Question: %s\n\n", visible(c.Question))
+	fmt.Fprintf(&b, "Ask %d, put to %q by session %q\n", seq, visible(c.Upstream), visible(c.Session))
+	fmt.Fprintf(&b, "Question:\n%s\n", block(c.Question))
 
 	ans, ok := core.AnswerTo(log, seq)
 	switch {
@@ -67,7 +68,7 @@ func AnswerScreen(log []core.Event, seq int) (string, error) {
 	case ans.Outcome == core.OutcomeNone:
 		fmt.Fprintf(&b, "No answer: %s.\n", ans.Detail)
 	case ans.Outcome == core.OutcomeTyped:
-		fmt.Fprintf(&b, "Answer (a checked value): %s\n", ans.Value)
+		fmt.Fprintf(&b, "Answer (a checked value): %s\n", visible(string(ans.Value)))
 	default:
 		b.WriteString("Answer:\n")
 		b.WriteString(block(ans.Text))
@@ -87,14 +88,8 @@ func renderArgs(raw json.RawMessage) string {
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || len(args) == 0 {
 		return "  (none)\n"
 	}
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
 	var b strings.Builder
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(args)) {
 		var s string
 		if json.Unmarshal(args[k], &s) == nil && strings.ContainsAny(s, "\n") {
 			fmt.Fprintf(&b, "  %s:\n%s", visible(k), block(s))
@@ -106,25 +101,29 @@ func renderArgs(raw json.RawMessage) string {
 }
 
 // block indents text behind a bar, so that nothing in it can pass for part
-// of the screen around it.
+// of the screen around it. It is the only place where untrusted text may
+// span lines.
 func block(text string) string {
 	var b strings.Builder
-	for _, line := range strings.Split(visible(text), "\n") {
-		fmt.Fprintf(&b, "    | %s\n", line)
+	for _, line := range strings.Split(text, "\n") {
+		fmt.Fprintf(&b, "    | %s\n", visible(line))
 	}
 	return b.String()
 }
 
-// visible makes every character of untrusted text show up as itself.
-// Control characters, terminal escape sequences and invisible or
-// direction-changing characters are written out as escapes, so text cannot
-// repaint the screen or hide part of itself from the person reading it.
+// visible makes every character of untrusted text show up as itself, on
+// one line. Line breaks, control characters, terminal escape sequences and
+// invisible or direction-changing characters are written out as escapes,
+// so text cannot start a line of its own, repaint the screen or hide part
+// of itself from the person reading it.
 func visible(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case r == '\n' || unicode.IsPrint(r):
+		case unicode.IsPrint(r):
 			b.WriteRune(r)
+		case r == '\n':
+			b.WriteString(`\n`)
 		case r == '\t':
 			b.WriteString("    ")
 		case r <= 0xFFFF:

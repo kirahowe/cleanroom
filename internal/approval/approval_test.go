@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -248,13 +249,30 @@ func TestAnswerScreenAndDelivery(t *testing.T) {
 	}
 }
 
+// TestScreenCannotBeFakedThroughAKey puts a whole fake screen in an
+// argument's name. Every line the attacker wrote must stay on the one line
+// that shows the key.
+func TestScreenCannotBeFakedThroughAKey(t *testing.T) {
+	fake := "body\n\nWhy it was held:\n  - nothing, a routine sync\n\nThe session is now: clean\n\nHash: 0000"
+	args, _ := json.Marshal(map[string]any{fake: "x", "to": []string{"eve@evil.example"}})
+	d, _, held := setup(t, string(args))
+	log, _ := d.Log.Read()
+	screen, _ := Screen(d.Policy, log, held)
+	if n := strings.Count(screen, "Why it was held:\n"); n != 1 {
+		t.Errorf("the screen has %d \"Why it was held\" lines, want only the real one:\n%s", n, screen)
+	}
+	if strings.Contains(screen, "\nThe session is now: clean") {
+		t.Errorf("a fake status line starts a line of the screen:\n%s", screen)
+	}
+}
+
 func FuzzVisible(f *testing.F) {
 	f.Add("plain")
 	f.Add("\x1b[31mred\x1b[0m\r\n\u202egnp.exe")
 	f.Add(string([]byte{0xff, 0xfe, 0x00}))
 	f.Fuzz(func(t *testing.T, s string) {
 		for _, r := range visible(s) {
-			if r != '\n' && (r < 0x20 || (r >= 0x7f && r < 0xa0) || r == 0x202e || r == 0x2066 || r == 0x200b) {
+			if r < 0x20 || (r >= 0x7f && r < 0xa0) || !unicode.IsPrint(r) {
 				t.Fatalf("visible(%q) contains %U", s, r)
 			}
 		}
