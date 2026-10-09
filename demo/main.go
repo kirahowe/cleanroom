@@ -67,6 +67,9 @@ type demo struct {
 	state  string // state directory, wiped at the start of each run
 	cfg    *config.Config
 	log    *eventlog.Log
+	// ownInbox is true when the demo started Mailpit and seeded it, so
+	// that every message in the inbox is one of the demo's.
+	ownInbox bool
 
 	passed, failed int
 }
@@ -136,6 +139,7 @@ func (d *demo) startMailpit(bin string) (stop func(), err error) {
 		stop()
 		return nil, fmt.Errorf("seeding the inbox: %v\n%s", err, out)
 	}
+	d.ownInbox = true
 	fmt.Printf("Started Mailpit at http://%s and seeded it from demo/inbox.\n", mailpitHTTP)
 	return stop, nil
 }
@@ -197,7 +201,10 @@ func (a *agent) close() { a.cs.Close() }
 // call makes a tool call, prints it, and decodes the structured result
 // into out.
 func (a *agent) call(tool string, args map[string]any, out any) string {
-	argText, _ := json.Marshal(args)
+	argText := []byte("{}")
+	if args != nil {
+		argText, _ = json.Marshal(args)
+	}
 	fmt.Printf("  agent   %s %s\n", tool, argText)
 	res, err := a.cs.CallTool(context.Background(), &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
