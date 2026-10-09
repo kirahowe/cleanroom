@@ -79,51 +79,7 @@ func (g *Gateway) status() (Status, error) {
 func describe(log []core.Event, seqs []int) []string {
 	var out []string
 	for _, seq := range seqs {
-		out = append(out, fmt.Sprintf("event %d: %s", seq, Summary(log, seq)))
+		out = append(out, fmt.Sprintf("event %d: %s", seq, core.Summarize(log, seq)))
 	}
 	return out
-}
-
-// Summary says in a few words what happened at seq, for citing an event in
-// an explanation. It quotes nothing that came from a source.
-func Summary(log []core.Event, seq int) string {
-	if seq < 1 || seq > len(log) {
-		return "unknown event"
-	}
-	e := log[seq-1]
-	switch e.Kind {
-	case core.KindCall:
-		return callSummary(e.Call.Call)
-	case core.KindApproval:
-		verb := "denied"
-		if e.Approval.Approve {
-			verb = "approved"
-		}
-		return fmt.Sprintf("the person %s proposal %d: %s", verb, e.Approval.Ref, Summary(log, e.Approval.Ref))
-	case core.KindAnswer:
-		return fmt.Sprintf("answer to ask %d", e.Answer.Ref)
-	case core.KindResult:
-		return fmt.Sprintf("result of call %d", e.Result.Ref)
-	case core.KindDelivered:
-		return fmt.Sprintf("answer %d shown to the person", e.Delivered.Ref)
-	}
-	return string(e.Kind)
-}
-
-func callSummary(c core.Call) string {
-	switch c.Op {
-	case core.OpTool:
-		return fmt.Sprintf("called %s.%s", c.Upstream, c.Tool)
-	case core.OpAsk:
-		if c.AcceptContamination {
-			return fmt.Sprintf("asked %s and accepted contamination", c.Upstream)
-		}
-		return fmt.Sprintf("asked %s", c.Upstream)
-	case core.OpReadAnswer:
-		if c.AcceptContamination {
-			return fmt.Sprintf("read stored answer %d and accepted contamination", c.Answer)
-		}
-		return fmt.Sprintf("read stored answer %d", c.Answer)
-	}
-	return string(c.Op)
 }

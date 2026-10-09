@@ -50,7 +50,7 @@ func TestTypedAnswerComesBackAndCallerStaysUncontaminated(t *testing.T) {
 	if got, want := w.labels(core.ReaderSession(res.ID)), (core.Labels{Contaminated: true, Private: true}); got != want {
 		t.Errorf("reader labels = %v, want %v", got, want)
 	}
-	if diff := cmp.Diff([]string{`search {"query":"reunion"}`, `read {"id":"m1"}`}, w.fakes["inbox"].seen()); diff != "" {
+	if diff := cmp.Diff([]string{`search {"query":"reunion"}`, `read {"id":"m1"}`}, w.fakes["inbox"].Seen()); diff != "" {
 		t.Errorf("inbox calls (-want +got):\n%s", diff)
 	}
 	// So the caller can act on the answer with no approval.
@@ -83,7 +83,7 @@ func TestObedientReaderGetsNowhere(t *testing.T) {
 	if !strings.HasPrefix(sendResult, "REFUSED") {
 		t.Errorf("the reader's send returned %q, want a refusal", sendResult)
 	}
-	for _, c := range w.fakes["inbox"].seen() {
+	for _, c := range w.fakes["inbox"].Seen() {
 		if strings.HasPrefix(c, "send") {
 			t.Errorf("the reader's send reached the upstream: %s", c)
 		}
@@ -134,6 +134,43 @@ func TestAcceptingContaminationReturnsTextAndHoldsLaterActs(t *testing.T) {
 	call(t, w.agent("chief"), "calendar_create_event", nil, &held)
 	if held.Status != "held" {
 		t.Error("an act call ran in a session that accepted contamination")
+	}
+}
+
+func TestReadAnswerNeedsTheOptIn(t *testing.T) {
+	w := newWorld(t)
+	w.useReader(honestReader(`"In transit at the Mississauga sorting facility."`))
+	asked, _ := ask(t, w, "chief", map[string]any{"source": "inbox", "question": "Where is my order?", "returns": "text"})
+	cs := w.agent("chief")
+
+	refused := call(t, cs, "read_answer", map[string]any{"id": asked.ID}, nil)
+	if !refused.IsError || strings.Contains(text(refused), "Mississauga") {
+		t.Fatalf("read_answer without the opt-in = %q", text(refused))
+	}
+	if w.labels("chief").Contaminated {
+		t.Fatal("a refused read contaminated the session")
+	}
+
+	var res AskResult
+	call(t, cs, "read_answer", map[string]any{"id": asked.ID, "accept_contamination": true}, &res)
+	if res.Status != "answered" || !strings.Contains(res.Text, "Mississauga") {
+		t.Fatalf("read_answer = %+v", res)
+	}
+	if got, want := w.labels("chief"), (core.Labels{Contaminated: true, Private: true}); got != want {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+
+	// Another session can read it too, at the same price. The labels
+	// travel with the stored value.
+	call(t, w.agent("other"), "read_answer", map[string]any{"id": asked.ID, "accept_contamination": true}, nil)
+	if !w.labels("other").Contaminated {
+		t.Error("a second session read the stored answer and stayed uncontaminated")
+	}
+
+	for _, args := range []map[string]any{{"id": 9999}, {"id": 1}, {}, {"id": asked.ID, "accept": true}} {
+		if res := call(t, cs, "read_answer", args, nil); !res.IsError {
+			t.Errorf("read_answer %v = %q, want an error", args, text(res))
+		}
 	}
 }
 

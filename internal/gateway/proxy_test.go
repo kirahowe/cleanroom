@@ -27,7 +27,7 @@ func TestToolsOffered(t *testing.T) {
 	// calendar_mystery is missing: it has no class, so it is not offered.
 	// inbox_search and inbox_read are missing too: inbox is ask_only, so
 	// only its send tool is offered.
-	want := []string{"ask", "calendar_create_event", "calendar_list_events", "inbox_send", "mail_search", "mail_send", "shady_harmless", "status"}
+	want := []string{"ask", "calendar_create_event", "calendar_list_events", "inbox_send", "mail_search", "mail_send", "read_answer", "shady_harmless", "status"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("tools (-want +got):\n%s", diff)
 	}
@@ -41,7 +41,7 @@ func TestCleanSessionCallPassesThrough(t *testing.T) {
 		t.Fatalf("result = %q (error %v), want the upstream's reply", text(res), res.IsError)
 	}
 	want := []string{`create_event {"date":"2027-07-17","title":"Family reunion"}`}
-	if diff := cmp.Diff(want, w.fakes["calendar"].seen()); diff != "" {
+	if diff := cmp.Diff(want, w.fakes["calendar"].Seen()); diff != "" {
 		t.Errorf("upstream calls (-want +got):\n%s", diff)
 	}
 }
@@ -64,7 +64,7 @@ func TestDirectReadContaminatesAndLaterActsAreHeld(t *testing.T) {
 		t.Errorf("held text does not cite what contaminated the session:\n%s", text(res))
 	}
 	// The whole point: the upstream never saw the send.
-	if diff := cmp.Diff([]string{`search {"query":"order"}`}, w.fakes["mail"].seen()); diff != "" {
+	if diff := cmp.Diff([]string{`search {"query":"order"}`}, w.fakes["mail"].Seen()); diff != "" {
 		t.Errorf("mail upstream calls (-want +got):\n%s", diff)
 	}
 
@@ -93,7 +93,7 @@ func TestPolicyOverridesAnnotations(t *testing.T) {
 	if held.Status != "held" {
 		t.Errorf("a tool annotated read-only ran in a contaminated session despite the policy")
 	}
-	if len(w.fakes["shady"].seen()) != 0 {
+	if len(w.fakes["shady"].Seen()) != 0 {
 		t.Error("the upstream was called")
 	}
 	// A tool the policy does not mention falls back to its annotations.
@@ -155,7 +155,7 @@ func TestParallelCallsCannotSlipPast(t *testing.T) {
 			}
 		}
 	}
-	if got := len(w.fakes["calendar"].seen()); got != ran {
+	if got := len(w.fakes["calendar"].Seen()); got != ran {
 		t.Errorf("the upstream saw %d calls, the log allowed %d", got, ran)
 	}
 }

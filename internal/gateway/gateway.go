@@ -94,6 +94,7 @@ func (g *Gateway) Server(ctx context.Context) (*mcp.Server, error) {
 	})
 	g.addStatus(s)
 	g.addAsk(s)
+	g.addReadAnswer(s)
 	if err := g.addUpstreamTools(ctx, s); err != nil {
 		return nil, err
 	}

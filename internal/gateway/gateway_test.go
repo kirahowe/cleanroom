@@ -90,7 +90,7 @@ func TestStatusOfANewSession(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	if diff := cmp.Diff([]string{"ask", "status"}, names); diff != "" {
+	if diff := cmp.Diff([]string{"ask", "read_answer", "status"}, names); diff != "" {
 		t.Fatalf("built-in tools (-want +got):\n%s", diff)
 	}
 
