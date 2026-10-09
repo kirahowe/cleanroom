@@ -25,7 +25,12 @@ func readerToolsCommand(fs *flag.FlagSet, c *common) func(context.Context) error
 		if err != nil {
 			return err
 		}
-		upstreams := upstream.New(st.cfg.Policy, upstream.CommandDialer(st.cfg.Dir))
+		children, err := st.childLog()
+		if err != nil {
+			return err
+		}
+		defer children.Close()
+		upstreams := upstream.New(st.cfg.Policy, upstream.CommandDialer(st.cfg.Dir, children))
 		defer upstreams.Close()
 		g := &gateway.Gateway{Policy: st.cfg.Policy, Log: st.log, Upstreams: upstreams, Logf: log.Printf}
 		server, err := g.ReaderServer(ctx, *ask)

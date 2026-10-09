@@ -26,14 +26,19 @@ func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			return err
 		}
 		cfg := st.cfg
+		children, err := st.childLog()
+		if err != nil {
+			return err
+		}
+		defer children.Close()
 		if *session == "" {
 			*session = newSessionID()
 			fmt.Fprintf(c.stderr, "cleanroom: no --session given, using %s. "+
 				"If this conversation is resumed in a new process it will start clean; pass --session to prevent that.\n", *session)
 		}
-		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir))
+		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir, children))
 		defer upstreams.Close()
-		readers, err := commandReaders(cfg, st.dir)
+		readers, err := commandReaders(cfg, st.dir, log.New(children, "", log.LstdFlags).Printf)
 		if err != nil {
 			return err
 		}
@@ -53,7 +58,7 @@ func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 // commandReaders builds the reader for each source that has one in the
 // policy. Each reader reaches its source through this same binary, run as
 // "cleanroom reader-tools" against the same policy and state.
-func commandReaders(cfg *config.Config, stateDir string) (map[string]reader.Reader, error) {
+func commandReaders(cfg *config.Config, stateDir string, logf func(string, ...any)) (map[string]reader.Reader, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -67,7 +72,7 @@ func commandReaders(cfg *config.Config, stateDir string) (map[string]reader.Read
 			Argv:       up.Reader,
 			Dir:        cfg.Dir,
 			ToolServer: []string{self, "reader-tools", "--policy", cfg.Path, "--state", stateDir},
-			Logf:       log.Printf,
+			Logf:       logf,
 		}
 	}
 	return readers, nil

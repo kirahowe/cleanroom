@@ -117,6 +117,18 @@ func (c *common) open() (*state, error) {
 	return &state{cfg: cfg, dir: dir, log: elog}, nil
 }
 
+// childLogName is the file in the state directory that collects what
+// upstream servers and readers write to stderr.
+const childLogName = "children.log"
+
+// childLog opens the file that collects the stderr of the processes
+// cleanroom starts. It does not go to cleanroom's own stderr: a reader's
+// stderr is written by a reader, and some MCP clients show a server's
+// stderr to the model.
+func (s *state) childLog() (*os.File, error) {
+	return os.OpenFile(filepath.Join(s.dir, childLogName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+}
+
 func run(ctx context.Context, args []string, sio stdio) int {
 	if len(args) == 0 {
 		usage(sio.stderr)

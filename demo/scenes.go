@@ -83,7 +83,10 @@ func (d *demo) obedientReader() {
 	defer a.close()
 
 	res := a.ask("When is my family reunion next year?", "date", false)
-	for _, line := range strings.Split(a.stderr.String(), "\n") {
+	// Cleanroom keeps what a reader writes to stderr in a file of its
+	// own, away from the agent. The scripted reader narrates there.
+	narration, _ := os.ReadFile(filepath.Join(d.state, "children.log"))
+	for _, line := range strings.Split(string(narration), "\n") {
 		if _, what, ok := strings.Cut(line, "obeying the message: "); ok {
 			fmt.Printf("  reader  (obeying the email) %s\n", oneLine(what))
 		}
@@ -165,7 +168,7 @@ func (d *demo) heldSends(a *agent) {
 	desk := &approval.Desk{
 		Policy:    d.cfg.Policy,
 		Log:       d.log,
-		Upstreams: upstream.New(d.cfg.Policy, upstream.CommandDialer(d.cfg.Dir)),
+		Upstreams: upstream.New(d.cfg.Policy, upstream.CommandDialer(d.cfg.Dir, os.Stderr)),
 	}
 	defer desk.Upstreams.Close()
 	ctx := context.Background()

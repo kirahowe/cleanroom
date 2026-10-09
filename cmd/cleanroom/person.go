@@ -127,7 +127,12 @@ func approveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			return nil
 		}
 
-		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir))
+		children, err := st.childLog()
+		if err != nil {
+			return err
+		}
+		defer children.Close()
+		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir, children))
 		defer upstreams.Close()
 		desk := &approval.Desk{Policy: cfg.Policy, Log: st.log, Upstreams: upstreams}
 		// The hash is the one on the screen just shown. If the stored

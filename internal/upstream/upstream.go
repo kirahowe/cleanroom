@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -64,14 +65,15 @@ func New(p core.Policy, dial Dialer) *Set {
 }
 
 // CommandDialer starts each upstream as a child process, with dir as its
-// working directory, and speaks MCP over its stdin and stdout.
-func CommandDialer(dir string) Dialer {
+// working directory, and speaks MCP over its stdin and stdout. What the
+// process writes to stderr goes to stderr, which may be nil to discard it.
+func CommandDialer(dir string, stderr io.Writer) Dialer {
 	return func(ctx context.Context, name string, up core.Upstream) (*mcp.ClientSession, error) {
 		// Not CommandContext: the process must outlive the call that
 		// started it. Close stops it.
 		cmd := exec.Command(up.Command[0], up.Command[1:]...)
 		cmd.Dir = dir
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = stderr
 		cmd.Env = os.Environ()
 		for k, v := range up.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
