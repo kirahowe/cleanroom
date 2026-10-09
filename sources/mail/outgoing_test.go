@@ -18,6 +18,9 @@ func TestNewOutgoingRejects(t *testing.T) {
 		{"no recipients", nil, "s", "b"},
 		{"too many recipients", make([]string, maxRecipients+1), "s", "b"},
 		{"bad address", []string{"not an address"}, "s", "b"},
+		// A quoted local part that would become a source route in RCPT TO.
+		{"source route in a quoted local part", []string{`"@evil.example:kira"@example.com`}, "s", "b"},
+		{"quoted local part", []string{`"a b"@example.com`}, "s", "b"},
 		{"newline in address", []string{"a@example.com\r\nBcc: x@example.com"}, "s", "b"},
 		{"quoted newline in address", []string{"\"a\r\nb\"@example.com"}, "s", "b"},
 		{"non-ascii address", []string{"é@example.com"}, "s", "b"},

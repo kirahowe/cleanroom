@@ -9,6 +9,7 @@ import (
 	"mime"
 	"mime/quotedprintable"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -73,13 +74,19 @@ func parseAddress(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid address %q: %w", raw, err)
 	}
-	for _, r := range parsed.Address {
-		if r <= ' ' || r >= 0x7f || r == '<' || r == '>' {
-			return "", fmt.Errorf("invalid address %q: unsupported character", raw)
-		}
+	// Accept only plain addresses: an unquoted local part, an "@" and a
+	// domain. net/mail also accepts a quoted local part such as
+	// "@relay.example:user"@example.com, which it returns without the
+	// quotes. Written into RCPT TO that way it is a source route to
+	// another host, while the header shows the harmless quoted form.
+	if !plainAddress.MatchString(parsed.Address) {
+		return "", fmt.Errorf("invalid address %q: only plain user@domain addresses are accepted", raw)
 	}
 	return parsed.Address, nil
 }
+
+// plainAddress matches an address whose local part needs no quoting.
+var plainAddress = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*$")
 
 func isControl(r rune) bool {
 	return (r < ' ' && r != '\t') || r == 0x7f

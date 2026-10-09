@@ -254,8 +254,10 @@ func validateText(field, v string, max int, required bool) error {
 
 func parseDate(field, v string) (time.Time, error) {
 	t, err := time.Parse(dateLayout, v)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: %s %q is not a valid YYYY-MM-DD date", ErrInvalid, field, v)
+	// The year is bounded so that the day after an event's last day,
+	// which the .ics file needs, still has a four-digit year.
+	if err != nil || t.Year() < 1900 || t.Year() > 9000 {
+		return time.Time{}, fmt.Errorf("%w: %s %q is not a valid YYYY-MM-DD date between 1900 and 9000", ErrInvalid, field, v)
 	}
 	return t, nil
 }
