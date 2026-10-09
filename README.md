@@ -115,7 +115,7 @@ What comes back depends on `returns`:
 
 | `returns` | The caller receives | The caller's session becomes |
 | --- | --- | --- |
-| `date`, `datetime`, `number`, `money`, `boolean`, a `choice` from the caller's own list, or a `record` of those | the value, serialised again by cleanroom, or "no answer" | private, if the source is |
+| `date`, `datetime` (in UTC), `number`, `money`, `boolean`, a `choice` from the caller's own list, or a `record` of those | the value, serialised again by cleanroom, or "no answer" | private, if the source is |
 | `text` | an id; the text is delivered to you | unchanged |
 | `text` with `accept_contamination: true` | the text | contaminated, for the rest of its life |
 
@@ -180,7 +180,15 @@ cleanroom takes a first guess from the MCP tool annotations (`readOnlyHint`,
 `destructiveHint`, `openWorldHint`). Annotations come from the upstream
 server, so the policy always wins: in the demo, the calendar server calls
 `create_event` a non-destructive write, and the policy says it acts for the
-user. A tool with no class from either place is refused and not offered.
+user. A source does not get to class its own tools at all: on an upstream that
+has labels, annotations are ignored and every tool needs a policy entry. A
+tool with no class is refused and not offered.
+
+A tool marked `discard_result` in the policy returns nothing to the agent but
+whether it ran. That is for tools called for their effect, such as sending
+mail. Without it, calling any tool of an untrusted source would contaminate
+the caller, and with it nothing about the tool's output has to be taken on
+trust, error messages included.
 
 The rest of what holds, with the test that checks it:
 
@@ -197,9 +205,16 @@ The rest of what holds, with the test that checks it:
 - A held or refused call never reaches the upstream. The tests count what the
   fake upstreams saw.
 - Labels follow data. A stored answer keeps the labels of the reader that
-  wrote it, and a session that reads it takes them on. A session that writes
-  to an upstream leaves its labels there for later readers
-  (`TestLabelsFollowStoredValues`).
+  wrote it and of the session that asked, and a session that reads it takes
+  them on. A session that writes to an upstream leaves its labels there for
+  later readers (`TestLabelsFollowStoredValues`,
+  `TestAnswersCarryTheAskersLabels`).
+- A question is data leaving the session, since the reader passes it on to
+  the source. A session that is contaminated and private may not ask a source
+  whose reader can send data out (`TestAskIsNotAWayOut`).
+- Arguments that repeat a key, or have keys that differ only in case, are
+  refused, so the approval screen and the upstream cannot disagree about
+  what a call says.
 - A session is identified by `--session` or `CLEANROOM_SESSION`, chosen by
   whatever launches the server. A conversation that is resumed under the same
   id gets its history back from the log and does not come back clean
@@ -263,10 +278,12 @@ imports from the gateway.
      "reader": ["my-reader", "{mcp_config}", "{question}", "{returns}"],
      "tools": {
        "search": {"class": "read"},
-       "comment": {"class": "act"},
+       "comment": {"class": "act", "discard_result": true},
      },
    },
    ```
+
+   Every tool of a source needs an entry. Tools without one are not offered.
 
 3. Restart the server. `ask` now accepts `"source": "tickets"`.
 
@@ -327,8 +344,23 @@ arrangement the paragraph above warns against.
   casual case. It is not a boundary. A real one needs the agent in a sandbox
   or under another user, or the approval moved to another device.
 - A typed value can be wrong. It can also carry a few bits: a compromised
-  reader chooses which valid date to return. That is a covert channel to an
-  agent that is not listening for one, not an injection.
+  reader chooses which valid date to return, and the id of an ask reveals how
+  many calls earlier readers made. That is a covert channel to an agent that
+  is not listening for one, not an injection.
+- An upstream's tool names, descriptions and schemas are passed to the agent
+  as they are. They come from the server's code, which the policy trusts, not
+  from its content. A remote server that could change them would need more
+  than this.
+- A reader is only as confined as its command. Cleanroom gives it the tools
+  of one source, but the program runs as you, with your environment. A model
+  behind a reader must be started with no tools of its own.
+- A session id is whatever the launcher passes. An agent with a shell could
+  start a second server under a new id and be clean there.
+- A contaminated and private session that asks a source whose reader can
+  send data out is refused, not held. Holding an ask for approval is not
+  built.
+- `explain` replays a decision under the current policy. If the policy has
+  changed since, it says so instead of matching.
 - The policy file is trusted. A tool classed `read` that in fact sends mail,
   or a source whose labels leave out `contaminated`, defeats the tracking.
 - Labels on an upstream are tracked per upstream, not per item, because
