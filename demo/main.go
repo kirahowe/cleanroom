@@ -128,7 +128,7 @@ func (d *demo) startMailpit(bin string) (stop func(), err error) {
 	for deadline := time.Now().Add(10 * time.Second); !mailpitUp(); {
 		if time.Now().After(deadline) {
 			stop()
-			return nil, fmt.Errorf("Mailpit did not come up on %s", mailpitHTTP)
+			return nil, fmt.Errorf("no Mailpit answered on %s within 10 seconds", mailpitHTTP)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

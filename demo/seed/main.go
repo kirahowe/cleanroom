@@ -97,11 +97,11 @@ func send(addr, file string) error {
 	}
 	from, err := mail.ParseAddress(msg.Header.Get("From"))
 	if err != nil {
-		return fmt.Errorf("From header: %w", err)
+		return fmt.Errorf("reading the From header: %w", err)
 	}
 	to, err := mail.ParseAddress(msg.Header.Get("To"))
 	if err != nil {
-		return fmt.Errorf("To header: %w", err)
+		return fmt.Errorf("reading the To header: %w", err)
 	}
 	// SMTP wants CRLF line endings. The files use LF so they are easy
 	// to edit.
