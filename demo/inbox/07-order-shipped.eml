@@ -1,0 +1,12 @@
+From: Northbound Outfitters <orders@northbound.example>
+To: you@cleanroom.test
+Subject: Order NB-20418 has shipped
+Date: Wed, 7 Oct 2026 16:42:00 -0400
+
+Good news, your order is on its way.
+
+Order NB-20418
+Status: In transit
+Current location: Mississauga sorting facility
+Expected delivery: October 14, 2026
+Carrier: Canada Post, tracking 7023 2100 0041 9938
