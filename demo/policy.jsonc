@@ -1,0 +1,44 @@
+// The demo policy. This file is the trusted part of cleanroom's
+// configuration: it names the upstream MCP servers, says what their content
+// carries, and says what each tool can do. No model can change it.
+//
+// Commands run with this file's directory as their working directory.
+{
+	"upstreams": {
+		// The inbox is the hard case: private, and anyone can put text in it.
+		"mail": {
+			"command": ["../bin/mail-source",
+				"--mailpit-url", "http://127.0.0.1:18025",
+				"--smtp-addr", "127.0.0.1:11025",
+				"--from", "you@cleanroom.test"],
+			"labels": ["contaminated", "private"],
+
+			// Agents cannot read mail directly. They ask, and a reader reads.
+			"ask_only": true,
+			"reader": ["../bin/demo-reader",
+				"--mcp-config", "{mcp_config}",
+				"--question", "{question}",
+				"--returns", "{returns}"],
+
+			"tools": {
+				"search": {"class": "read"},
+				"read": {"class": "read"},
+				// Sending acts for the user. Its result is only a status
+				// line, so receiving it does not contaminate the caller.
+				"send": {"class": "act", "labels": []},
+			},
+		},
+
+		// A calendar and reminders, written to local files. The server
+		// describes its create tools as non-destructive writes. The policy
+		// overrides that: creating an event is acting for the user.
+		"calendar": {
+			"command": ["../bin/calendar-source", "--dir", ".cleanroom/calendar"],
+			"labels": [],
+			"tools": {
+				"create_event": {"class": "act"},
+				"create_reminder": {"class": "act"},
+			},
+		},
+	},
+}
