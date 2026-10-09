@@ -19,14 +19,13 @@ import (
 // and then had a send held. It returns the held call's Seq.
 func setup(t *testing.T, args string) (*Desk, *mcptest.Upstream, int) {
 	t.Helper()
-	none := core.Labels{}
 	policy := core.Policy{Upstreams: map[string]core.Upstream{
 		"mail": {
 			Command: []string{"fake"},
 			Labels:  core.Labels{Contaminated: true, Private: true},
 			Tools: map[string]core.Tool{
 				"search": {Class: core.Read},
-				"send":   {Class: core.Act, Labels: &none},
+				"send":   {Class: core.Act, DiscardResult: true},
 				"broken": {Class: core.Act},
 			},
 		},

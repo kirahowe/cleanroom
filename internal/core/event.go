@@ -50,6 +50,8 @@ const (
 	OpReadAnswer Op = "read_answer" // read a stored answer
 )
 
+func (o Op) valid() bool { return o == OpTool || o == OpAsk || o == OpReadAnswer }
+
 // Call is a request from a session, before any decision. It holds every
 // input the decision depends on apart from the policy and the log.
 type Call struct {
@@ -181,6 +183,7 @@ func readerAsk(session string) (int, bool) {
 // (StateOf, SourceLabels, Proposals) assume a log that passes, so the shell
 // checks a log when it loads it.
 func CheckLog(log []Event) error {
+	resolved := map[int]bool{} // Seq of each held call already approved or denied
 	for i, e := range log {
 		if e.Seq != i+1 {
 			return fmt.Errorf("event at position %d has seq %d", i+1, e.Seq)
@@ -212,6 +215,12 @@ func CheckLog(log []Event) error {
 		}
 		if wantRef && (ref < 1 || ref >= e.Seq || log[ref-1].Kind != KindCall) {
 			return fmt.Errorf("event %d refers to %d, which is not an earlier call", e.Seq, ref)
+		}
+		if e.Kind == KindApproval {
+			if log[ref-1].Call.Decision.Verdict != Hold || resolved[ref] {
+				return fmt.Errorf("event %d resolves %d, which is not a held call waiting for a decision", e.Seq, ref)
+			}
+			resolved[ref] = true
 		}
 	}
 	return nil

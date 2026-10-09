@@ -26,9 +26,11 @@ func Conclude(p Policy, log []Event, askSeq int, raw []byte, failure string) (Ev
 	}
 
 	// The answer was written by a reader that read the source, so it
-	// carries what the source carries now.
+	// carries what the source carries now. It also carries what the
+	// asking session carried, because that session wrote the question:
+	// a reader can be made to repeat a question as its answer.
 	source := SourceLabels(p, log, ask.Call.Upstream)
-	a := &Answer{Ref: askSeq, Outcome: OutcomeNone, Labels: source}
+	a := &Answer{Ref: askSeq, Outcome: OutcomeNone, Labels: source.Union(ask.Held)}
 	switch {
 	case failure != "":
 		a.Detail = failure
@@ -40,10 +42,13 @@ func Conclude(p Policy, log []Event, askSeq int, raw []byte, failure string) (Ev
 		}
 	default:
 		if value, ok := typed.Check(spec, raw); ok {
-			// The type check is what removes contamination: a value
-			// of the fixed grammar cannot carry instructions.
+			// The type check is what removes the source's
+			// contamination: a value of the fixed grammar cannot
+			// carry the source's instructions. The asker's labels
+			// stay, since the choices and field names in the value
+			// are the asker's own strings.
 			a.Outcome, a.Value = OutcomeTyped, value
-			a.Labels = Labels{Private: source.Private}
+			a.Labels = Labels{Private: source.Private}.Union(ask.Held)
 		} else {
 			a.Detail = fmt.Sprintf("the reader's answer was not a valid %s", spec.Type)
 		}
@@ -52,9 +57,11 @@ func Conclude(p Policy, log []Event, askSeq int, raw []byte, failure string) (Ev
 }
 
 // MayRelease reports whether the content of an answer may be handed to the
-// session whose call got decision d. The session must have taken on every
-// label the content carries. This is checked again at the moment of release
-// because a source's labels can grow between the decision and the answer.
-func MayRelease(d Decision, a Answer) bool {
-	return d.Verdict == Run && a.Outcome != OutcomeNone && d.Gains.Contains(a.Labels)
+// session that made the call c. The session must carry every label the
+// content carries, counting what it held before the call and what the call
+// gives it. This is checked at the moment of release because a source's
+// labels can grow between the decision and the answer.
+func MayRelease(c Decided, a Answer) bool {
+	return c.Decision.Verdict == Run && a.Outcome != OutcomeNone &&
+		c.Held.Union(c.Decision.Gains).Contains(a.Labels)
 }

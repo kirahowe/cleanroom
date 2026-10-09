@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -62,6 +63,10 @@ func (r readerTools) Call(ctx context.Context, tool string, args json.RawMessage
 	}), nil
 }
 
+// readerGrace is how long past its reader's deadline an ask stays open,
+// to allow for a slow start.
+const readerGrace = time.Minute
+
 // ReaderServer builds the MCP server that a reader running as a separate
 // program connects to. It offers the read-only tools of the source of the
 // ask at askSeq, under their own names, and nothing else.
@@ -73,6 +78,12 @@ func (g *Gateway) ReaderServer(ctx context.Context, askSeq int) (*mcp.Server, er
 	ask, ok := core.AskAt(events, askSeq)
 	if !ok {
 		return nil, fmt.Errorf("%d is not an ask", askSeq)
+	}
+	// An ask is normally closed by its answer. If the server that
+	// started the reader died first there is no answer, so the ask is
+	// also closed by age.
+	if age := time.Since(events[askSeq-1].Time); age > g.readerTimeout()+readerGrace {
+		return nil, fmt.Errorf("ask %d was made %s ago and is closed", askSeq, age.Round(time.Second))
 	}
 	rt := g.forReader(askSeq, ask.Call.Upstream)
 	tools, err := rt.List(ctx)

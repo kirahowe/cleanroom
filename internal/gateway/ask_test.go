@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"pgregory.net/rapid"
@@ -241,6 +242,12 @@ func TestReaderServerOffersOnlyReadTools(t *testing.T) {
 	}
 	if _, err := w.g.ReaderServer(context.Background(), 9999); err == nil {
 		t.Error("a reader server was built for an ask that does not exist")
+	}
+	// An ask that was never answered is closed by age.
+	// A negative timeout puts every ask past its deadline.
+	expired := &Gateway{Policy: w.g.Policy, Log: w.g.Log, Upstreams: w.g.Upstreams, ReaderTimeout: -time.Hour}
+	if _, err := expired.ReaderServer(context.Background(), res.ID); err == nil {
+		t.Error("a reader server was built for an ask past its deadline")
 	}
 }
 

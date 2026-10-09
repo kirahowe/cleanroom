@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"sync"
@@ -80,6 +81,44 @@ func TestDirectReadContaminatesAndLaterActsAreHeld(t *testing.T) {
 	other := w.agent("other")
 	if res := call(t, other, "calendar_create_event", nil, nil); text(res) != "created" {
 		t.Errorf("a clean session was affected: %q", text(res))
+	}
+}
+
+func TestDiscardedResultTellsTheCallerNothing(t *testing.T) {
+	w := newWorld(t)
+	cs := w.agent("chief")
+	// The fake replies "sent". The caller must not see even that.
+	res := call(t, cs, "mail_send", map[string]any{"to": "a@example.com"}, nil)
+	if res.IsError || text(res) != "mail.send ran." {
+		t.Errorf("mail_send = %q (error %v)", text(res), res.IsError)
+	}
+	if got := w.labels("chief"); got != (core.Labels{}) {
+		t.Errorf("labels = %v, want clean", got)
+	}
+}
+
+// TestOversizedCallDoesNotDamageTheLog sends arguments far over the limit.
+// The call is refused, the log keeps only a small record of it, and the
+// next call works.
+func TestOversizedCallDoesNotDamageTheLog(t *testing.T) {
+	w := newWorld(t)
+	cs := w.agent("chief")
+	big := map[string]any{"title": strings.Repeat("x", 4*core.MaxArgsBytes)}
+	if res := call(t, cs, "calendar_create_event", big, nil); !res.IsError {
+		t.Fatalf("an oversized call was not refused: %.80s", text(res))
+	}
+	if len(w.fakes["calendar"].Seen()) != 0 {
+		t.Error("the oversized call reached the upstream")
+	}
+	events, err := w.g.Log.Read()
+	if err != nil {
+		t.Fatalf("the log is unreadable after an oversized call: %v", err)
+	}
+	if stored, _ := json.Marshal(events); len(stored) > 4096 {
+		t.Errorf("the log grew to %d bytes", len(stored))
+	}
+	if res := call(t, cs, "calendar_create_event", nil, nil); text(res) != "created" {
+		t.Errorf("the next call = %q, want it to run", text(res))
 	}
 }
 

@@ -45,7 +45,7 @@ func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) error {
 			s.AddTool(&mcp.Tool{
 				Name:        public,
 				Title:       tool.Title,
-				Description: strings.TrimSpace(tool.Description + "\n\n" + classNote(class, up.Tools[tool.Name])),
+				Description: describeTool(tool.Description, class, up.Tools[tool.Name]),
 				InputSchema: tool.InputSchema,
 				Annotations: tool.Annotations,
 				// No OutputSchema: a held or refused call returns
@@ -58,6 +58,14 @@ func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) error {
 		}
 	}
 	return nil
+}
+
+func describeTool(upstream string, class core.Class, t core.Tool) string {
+	note := classNote(class, t)
+	if t.DiscardResult {
+		note += discardNote
+	}
+	return strings.TrimSpace(upstream + "\n\n" + note)
 }
 
 // classNote tells the agent how cleanroom treats a tool.
@@ -74,6 +82,10 @@ func classNote(class core.Class, t core.Tool) string {
 	}
 	return ""
 }
+
+// discardNote is added to the description of a tool whose result cleanroom
+// drops.
+const discardNote = " Cleanroom discards this tool's output: you are told only whether it ran."
 
 // callTool is the path every upstream call takes: decide and record, then
 // act, then record the result.
@@ -96,6 +108,14 @@ func (g *Gateway) callTool(ctx context.Context, c core.Call) *mcp.CallToolResult
 	// From here on, use only the call as it was recorded.
 	res, err := g.Upstreams.Call(ctx, c.Upstream, c.Tool, c.Args)
 	g.record(core.Event{Kind: core.KindResult, Result: &core.Result{Ref: rec.Seq, OK: err == nil && !res.IsError}})
+	if g.Policy.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult {
+		// The caller took on no labels for this call, so it gets none
+		// of the upstream's words either, not even an error message.
+		if err != nil || res.IsError {
+			return errorResult(fmt.Sprintf("%s.%s failed. Cleanroom discards this tool's output, so there are no details here.", c.Upstream, c.Tool))
+		}
+		return textResult(fmt.Sprintf("%s.%s ran.", c.Upstream, c.Tool), nil)
+	}
 	if err != nil {
 		return errorResult(fmt.Sprintf("%s.%s failed: %v", c.Upstream, c.Tool, err))
 	}

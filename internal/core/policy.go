@@ -41,7 +41,8 @@ type Upstream struct {
 
 	// Tools gives the class of each tool, overriding the server's own
 	// annotations. A tool with no entry here and no usable annotations
-	// is refused.
+	// is refused. On an upstream that has labels, annotations are not
+	// used at all: every tool of a source must be classed here.
 	Tools map[string]Tool `json:"tools,omitempty"`
 }
 
@@ -53,10 +54,12 @@ type Tool struct {
 	// AlwaysHold holds every call for approval, whatever the session's
 	// state.
 	AlwaysHold bool `json:"always_hold,omitempty"`
-	// Labels, if set, replaces the upstream's labels for this tool's
-	// results. A send tool that returns only "sent" can declare [] so
-	// that calling it does not contaminate the caller.
-	Labels *Labels `json:"labels,omitempty"`
+	// DiscardResult makes cleanroom drop what the tool returns. The
+	// caller is told only whether the call worked, so it takes on no
+	// labels from it. Use it for tools called for their effect, such as
+	// sending a message: without it, calling a tool of an untrusted
+	// source contaminates the caller, whatever the tool returns.
+	DiscardResult bool `json:"discard_result,omitempty"`
 }
 
 // Class is what a tool can do, as far as the decision is concerned.
@@ -104,7 +107,10 @@ func ClassFromHints(readOnly bool, destructive, openWorld *bool) Class {
 
 var (
 	upstreamName = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
-	sessionName  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	// toolName is what a tool may be called. The MCP spec recommends
+	// about this much, and it keeps a name printable wherever it is shown.
+	toolName    = regexp.MustCompile(`^[A-Za-z0-9_.\-/]{1,128}$`)
+	sessionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
 // ValidSession reports whether s can name a client session. The pattern
@@ -124,6 +130,9 @@ func (p Policy) Validate() error {
 			return fmt.Errorf("upstream %q has no command", name)
 		}
 		for tool, t := range up.Tools {
+			if !toolName.MatchString(tool) {
+				return fmt.Errorf("upstream %q: tool name %q must match %s", name, tool, toolName)
+			}
 			if t.Class != "" && !t.Class.valid() {
 				return fmt.Errorf("upstream %q tool %q: unknown class %q", name, tool, t.Class)
 			}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"cleanroom/internal/typed"
@@ -129,21 +130,33 @@ func decideTool(p Policy, log []Event, c Call) Decision {
 // ClassOf resolves a tool's class: the policy entry if there is one,
 // otherwise the hint taken from the server's annotations. It reports false
 // when neither gives a class, and such a tool is refused.
+//
+// Hints are not used for an upstream that has labels. A source returns
+// untrusted content, and its server may be no more trustworthy, so a source
+// cannot be the one to say that its own tools are harmless.
 func ClassOf(up Upstream, tool string, hint Class) (Class, bool) {
 	if t, ok := up.Tools[tool]; ok && t.Class != "" {
 		return t.Class, t.Class.valid()
 	}
+	if up.Labels != (Labels{}) {
+		return "", false
+	}
 	return hint, hint.valid()
 }
 
-// resultLabels is what the result of a tool call carries.
+// resultLabels is what the caller of a tool takes on: whatever the
+// upstream carries now, or nothing if cleanroom discards the result.
 func resultLabels(p Policy, log []Event, c Call) Labels {
-	if l := p.Upstreams[c.Upstream].Tools[c.Tool].Labels; l != nil {
-		return *l
+	if p.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult {
+		return Labels{}
 	}
 	return SourceLabels(p, log, c.Upstream)
 }
 
+// validArgs reports whether raw is a JSON object that means one thing
+// only. An object that repeats a key, or has two keys that differ only in
+// case, is refused: the approval screen would show one value and an
+// upstream might use the other.
 func validArgs(raw json.RawMessage) bool {
 	if len(raw) == 0 {
 		return true // no arguments
@@ -152,7 +165,48 @@ func validArgs(raw json.RawMessage) bool {
 		return false
 	}
 	var obj map[string]json.RawMessage
-	return json.Unmarshal(raw, &obj) == nil && obj != nil
+	if json.Unmarshal(raw, &obj) != nil || obj == nil {
+		return false
+	}
+	return !ambiguousKeys(json.NewDecoder(bytes.NewReader(raw)))
+}
+
+// ambiguousKeys walks one JSON value and reports whether any object in it
+// has two keys that are equal when case is ignored.
+func ambiguousKeys(dec *json.Decoder) bool {
+	tok, err := dec.Token()
+	if err != nil {
+		return true
+	}
+	switch tok {
+	case json.Delim('{'):
+		seen := map[string]bool{}
+		for dec.More() {
+			key, err := dec.Token()
+			if err != nil {
+				return true
+			}
+			folded := strings.ToLower(key.(string))
+			if seen[folded] {
+				return true
+			}
+			seen[folded] = true
+			if ambiguousKeys(dec) {
+				return true
+			}
+		}
+		_, err := dec.Token() // the closing brace
+		return err != nil
+	case json.Delim('['):
+		for dec.More() {
+			if ambiguousKeys(dec) {
+				return true
+			}
+		}
+		_, err := dec.Token() // the closing bracket
+		return err != nil
+	}
+	return false
 }
 
 func decideAsk(p Policy, log []Event, c Call) Decision {
@@ -174,7 +228,19 @@ func decideAsk(p Policy, log []Event, c Call) Decision {
 		return refuse(err.Error())
 	}
 
+	// A question is data leaving the session: the reader passes it on to
+	// the source as search terms, or as a URL if the source can fetch.
+	// A session that may be following someone else's instructions and
+	// holds private data must not have that way out.
 	source := SourceLabels(p, log, c.Upstream)
+	st := StateOf(p, log, c.Session)
+	if st.Labels.Contaminated && st.Labels.Private && readerCanSendOut(up, source) {
+		return Decision{Verdict: Refuse, Reasons: []Reason{
+			{Text: fmt.Sprintf("a reader of %q can send data out, and the question would carry it; the session is contaminated", c.Upstream), Events: st.ContaminatedBy},
+			{Text: "the session holds private data that the question could leak", Events: st.PrivateBy},
+		}}
+	}
+
 	d := Decision{Verdict: Run, Class: Read}
 	switch {
 	case !spec.IsText():
@@ -202,24 +268,21 @@ func decideReadAnswer(p Policy, log []Event, c Call) Decision {
 	if !ok {
 		return refuse(fmt.Sprintf("ask %d has not been answered yet", c.Answer))
 	}
-	switch ans.Outcome {
-	case OutcomeTyped:
-		return Decision{
-			Verdict: Run, Class: Read,
-			Gains:   Labels{Private: ans.Labels.Private},
-			Reasons: []Reason{{Text: "the answer is a typed value, which cannot carry instructions"}},
-		}
-	case OutcomeText:
-		if ans.Labels.Contaminated && !c.AcceptContamination {
-			return refuse("this answer is untrusted text; reading it contaminates the session for good, so it needs accept_contamination: true")
-		}
-		return Decision{
-			Verdict: Run, Class: Read,
-			Gains:   ans.Labels,
-			Reasons: []Reason{{Text: "the caller chose to read a stored answer and takes on its labels", Events: []int{c.Answer}}},
-		}
+	if ans.Outcome == OutcomeNone {
+		return refuse(fmt.Sprintf("ask %d has no answer", c.Answer))
 	}
-	return refuse(fmt.Sprintf("ask %d has no answer", c.Answer))
+	// An answer carries its own labels, whatever its type. A typed
+	// answer is contaminated only if the session that asked for it was,
+	// since that session chose the question, the choices and the field
+	// names.
+	if ans.Labels.Contaminated && !c.AcceptContamination {
+		return refuse("this answer is untrusted; reading it contaminates the session for good, so it needs accept_contamination: true")
+	}
+	return Decision{
+		Verdict: Run, Class: Read,
+		Gains:   ans.Labels,
+		Reasons: []Reason{{Text: "the caller reads a stored answer and takes on its labels", Events: []int{c.Answer}}},
+	}
 }
 
 // decideReader decides a call made by a reader. A reader is assumed to be
@@ -251,10 +314,13 @@ func decideReader(p Policy, log []Event, c Call, askSeq int) Decision {
 	if !validArgs(c.Args) {
 		return refuse("the arguments are not a JSON object of acceptable size")
 	}
+	if up.Tools[c.Tool].AlwaysHold {
+		return refuse(fmt.Sprintf("the policy holds every call to %s.%s, and a reader has nobody to ask", c.Upstream, c.Tool))
+	}
 	source := SourceLabels(p, log, c.Upstream)
 	switch {
 	case class == Read:
-	case class == Egress && !source.Private:
+	case readerMayUse(up, c.Tool, source):
 		// A reader of a public source may fetch: it holds nothing
 		// private to leak.
 	default:
@@ -275,29 +341,82 @@ func decideReader(p Policy, log []Event, c Call, askSeq int) Decision {
 	}
 }
 
+// readerMayUse reports whether a reader may call an egress tool of its
+// source. Only when the policy itself classes the tool egress, and only
+// when the source is not private: a reader that holds private content and
+// can send data out would have the whole trifecta to itself.
+func readerMayUse(up Upstream, tool string, source Labels) bool {
+	return up.Tools[tool].Class == Egress && !source.Private
+}
+
+// readerCanSendOut reports whether a reader of this source has any way to
+// send data out.
+func readerCanSendOut(up Upstream, source Labels) bool {
+	for tool := range up.Tools {
+		if readerMayUse(up, tool, source) {
+			return true
+		}
+	}
+	return false
+}
+
 func refuse(text string) Decision {
 	return Decision{Verdict: Refuse, Reasons: []Reason{{Text: text}}}
 }
 
-// Sanitize prepares a call for Decide and for the log. It compacts the JSON
-// in the call, so that the call reads back from the log byte for byte as it
-// was stored and its hash stays the same. JSON that does not parse cannot be
-// stored at all, so it is dropped and the call is marked invalid, which
-// Decide refuses.
+// Sanitize prepares a call for Decide and for the log, which every session
+// shares and which the person reads. After it, every name in the call is
+// short and printable, every piece of JSON parses and is compact, and
+// nothing is larger than its limit. Whatever did not meet that is dropped,
+// and the call is marked invalid, which Decide refuses.
+//
+// Compacting matters for the hash: a call must read back from the log byte
+// for byte as it was stored.
 func Sanitize(c Call) Call {
-	var ok bool
-	if c.Args, ok = compact(c.Args); !ok {
-		c.Invalid = "the arguments are not valid JSON"
+	invalid := func(why string) {
+		if c.Invalid == "" {
+			c.Invalid = why
+		}
 	}
-	if c.Returns, ok = compact(c.Returns); !ok {
-		c.Invalid = "the returns type is not valid JSON"
+	if _, isReader := readerAsk(c.Session); !isReader && !ValidSession(c.Session) {
+		c.Session = ""
+		invalid("the session id is not valid")
+	}
+	if c.Upstream != "" && !upstreamName.MatchString(c.Upstream) {
+		c.Upstream = ""
+		invalid("the upstream name is not valid")
+	}
+	if c.Tool != "" && !toolName.MatchString(c.Tool) {
+		c.Tool = ""
+		invalid("the tool name is not valid")
+	}
+	if !c.Op.valid() {
+		c.Op = ""
+		invalid("the operation is not one cleanroom knows")
+	}
+	if c.Hint != "" && !c.Hint.valid() {
+		c.Hint = ""
+	}
+	if len(c.Question) > MaxQuestionLen || !utf8.ValidString(c.Question) {
+		c.Question = ""
+		invalid(fmt.Sprintf("the question must be at most %d bytes of text", MaxQuestionLen))
+	}
+	var ok bool
+	if c.Args, ok = compact(c.Args, MaxArgsBytes); !ok {
+		invalid(fmt.Sprintf("the arguments are not valid JSON of at most %d bytes", MaxArgsBytes))
+	}
+	if c.Returns, ok = compact(c.Returns, maxReturnsBytes); !ok {
+		invalid("the returns type is not valid JSON of acceptable size")
 	}
 	return c
 }
 
-func compact(raw json.RawMessage) (json.RawMessage, bool) {
+func compact(raw json.RawMessage, limit int) (json.RawMessage, bool) {
 	if len(raw) == 0 {
 		return nil, true
+	}
+	if len(raw) > limit {
+		return nil, false
 	}
 	var b bytes.Buffer
 	if err := json.Compact(&b, raw); err != nil {

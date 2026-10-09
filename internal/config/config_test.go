@@ -28,7 +28,7 @@ func TestLoad(t *testing.T) {
 				"ask_only": true,
 				"reader": ["bin/reader", "{mcp_config}"],
 				"tools": {
-					"send": {"class": "act", "labels": []},
+					"send": {"class": "act", "discard_result": true},
 				},
 			},
 		},
@@ -41,7 +41,7 @@ func TestLoad(t *testing.T) {
 	if mail.Labels != (core.Labels{Contaminated: true, Private: true}) || !mail.AskOnly {
 		t.Errorf("mail = %+v", mail)
 	}
-	if send := mail.Tools["send"]; send.Class != core.Act || send.Labels == nil || *send.Labels != (core.Labels{}) {
+	if send := mail.Tools["send"]; send.Class != core.Act || !send.DiscardResult {
 		t.Errorf("send = %+v", send)
 	}
 	if cfg.Dir != filepath.Dir(path) {

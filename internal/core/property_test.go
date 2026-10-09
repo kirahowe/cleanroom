@@ -17,9 +17,9 @@ import (
 // without looking at the log. It answers one question: has this session
 // been handed untrusted content? The core must agree with it.
 type oracle struct {
-	exposed  map[string]bool // session -> was handed untrusted content
-	dirty    map[string]bool // upstream -> an exposed session wrote to it
-	textAsks map[int]bool    // Seq of an ask -> its stored answer is untrusted text
+	exposed map[string]bool // session -> was handed untrusted content
+	dirty   map[string]bool // upstream -> an exposed session wrote to it
+	answers map[int]bool    // Seq of an ask -> its stored answer is untrusted
 }
 
 func (o *oracle) untrusted(p Policy, upstream string) bool {
@@ -34,11 +34,7 @@ func (o *oracle) took(p Policy, c Call, class Class) {
 	if class != Read && o.exposed[c.Session] {
 		o.dirty[c.Upstream] = true
 	}
-	if l := p.Upstreams[c.Upstream].Tools[c.Tool].Labels; l != nil {
-		if l.Contaminated {
-			o.exposed[c.Session] = true
-		}
-	} else if o.untrusted(p, c.Upstream) {
+	if !p.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult && o.untrusted(p, c.Upstream) {
 		o.exposed[c.Session] = true
 	}
 }
@@ -61,7 +57,7 @@ func TestHistoryProperties(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		w := &world{t: t, p: testPolicy()}
 		w.p.SessionsStartPrivate = rapid.Bool().Draw(rt, "startPrivate")
-		o := &oracle{exposed: map[string]bool{}, dirty: map[string]bool{}, textAsks: map[int]bool{}}
+		o := &oracle{exposed: map[string]bool{}, dirty: map[string]bool{}, answers: map[int]bool{}}
 
 		steps := rapid.IntRange(1, 40).Draw(rt, "steps")
 		for i := 0; i < steps; i++ {
@@ -107,12 +103,16 @@ func TestHistoryProperties(t *testing.T) {
 						rt.Fatalf("reader of %s was allowed %s.%s: %+v", c.Upstream, ut[0], ut[1], rd)
 					}
 				}
+				askerWasExposed := o.exposed[c.Session]
 				a := w.conclude(ask, genAnswer.Draw(rt, "answer"))
-				untrusted := o.untrusted(w.p, c.Upstream)
-				if a.Outcome == OutcomeText && untrusted {
-					o.textAsks[ask] = true
+				// An answer is untrusted if it is text from an
+				// untrusted source, or if an exposed session asked
+				// for it, since that session wrote the question.
+				untrustedText := a.Outcome == OutcomeText && o.untrusted(w.p, c.Upstream)
+				if a.Outcome != OutcomeNone && (untrustedText || askerWasExposed) {
+					o.answers[ask] = true
 				}
-				if MayRelease(d, a) && a.Outcome == OutcomeText && untrusted {
+				if MayRelease(w.rec(ask), a) && untrustedText && !askerWasExposed {
 					if !c.AcceptContamination {
 						rt.Fatalf("untrusted text released without the opt-in: ask %d", ask)
 					}
@@ -131,8 +131,8 @@ func TestHistoryProperties(t *testing.T) {
 					AcceptContamination: rapid.Bool().Draw(rt, "accept"),
 				}
 				_, d := w.do(c)
-				if d.Verdict == Run && o.textAsks[c.Answer] {
-					if !c.AcceptContamination {
+				if d.Verdict == Run && o.answers[c.Answer] {
+					if !c.AcceptContamination && !o.exposed[c.Session] {
 						rt.Fatalf("untrusted answer %d read without the opt-in", c.Answer)
 					}
 					o.exposed[c.Session] = true

@@ -134,6 +134,7 @@ func (g *Gateway) ask(ctx context.Context, in askInput) *mcp.CallToolResult {
 		return errorResult("cleanroom could not record this ask, so it was not made: " + err.Error())
 	}
 	seq, c, d := rec.Seq, rec.Call.Call, rec.Call.Decision
+	asked := *rec.Call
 	if d.Verdict != core.Run {
 		return refusedResult(d)
 	}
@@ -152,13 +153,13 @@ func (g *Gateway) ask(ctx context.Context, in askInput) *mcp.CallToolResult {
 		// person.
 		res.Status = NoAnswer
 		res.Note = "The reader found no answer of the type you asked for."
-	case !core.MayRelease(d, ans) && ans.Outcome == core.OutcomeText:
+	case !core.MayRelease(asked, ans) && ans.Outcome == core.OutcomeText:
 		g.needsPerson(Notice{Kind: AnswerWaiting, Seq: seq})
 		res.Status = DeliveredToUser
 		res.Note = fmt.Sprintf("The answer is free text from an untrusted source, so it went to the user, not to you. "+
 			"They can read it with: cleanroom show %d. Tell them it is there. "+
 			"To read it yourself, call read_answer with accept_contamination: true, which contaminates this session.", seq)
-	case !core.MayRelease(d, ans):
+	case !core.MayRelease(asked, ans):
 		res.Status = NoAnswer
 		res.Note = "The source changed while the reader was working. Ask again."
 	case ans.Outcome == core.OutcomeTyped:
@@ -179,11 +180,7 @@ func (g *Gateway) runReader(ctx context.Context, seq int, c core.Call) (raw []by
 	if !ok {
 		return nil, fmt.Sprintf("no reader is available for %q", c.Upstream)
 	}
-	timeout := g.ReaderTimeout
-	if timeout == 0 {
-		timeout = defaultReaderTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, g.readerTimeout())
 	defer cancel()
 	raw, err := rd.Answer(ctx, reader.Job{
 		Ask: seq, Source: c.Upstream, Question: c.Question, Returns: c.Returns,
@@ -193,6 +190,13 @@ func (g *Gateway) runReader(ctx context.Context, seq int, c core.Call) (raw []by
 		return nil, err.Error()
 	}
 	return raw, ""
+}
+
+func (g *Gateway) readerTimeout() time.Duration {
+	if g.ReaderTimeout == 0 {
+		return defaultReaderTimeout
+	}
+	return g.ReaderTimeout
 }
 
 // conclude checks the reader's output and records the answer.
