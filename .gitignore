@@ -1,0 +1,10 @@
+# Built binaries and downloaded tools.
+/bin/
+/.tools/
+
+# Runtime state. The event log holds the text of answers and held calls,
+# which for a mail source means email text.
+/.cleanroom/
+
+# Credentials for real mailboxes never belong in the repository.
+*.env
