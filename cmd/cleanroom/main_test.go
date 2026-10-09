@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -41,6 +42,16 @@ func fakeUpstream() {
 		Description: "Create an event.",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Leave a trace on disk, so a test can count how many times the
+		// effect really happened.
+		if path := os.Getenv("FAKE_UPSTREAM_TRACE"); path != "" {
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(f, "create_event %s\n", req.Params.Arguments)
+			f.Close()
+		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "created " + string(req.Params.Arguments)}}}, nil
 	})
 	s.AddTool(&mcp.Tool{
@@ -105,6 +116,15 @@ func cleanroom(t *testing.T, args ...string) *exec.Cmd {
 	cmd.Env = append(os.Environ(), "CLEANROOM_TEST_AS=cleanroom")
 	cmd.Stderr = os.Stderr
 	return cmd
+}
+
+// runCLI runs a cleanroom command in this process, as a person at a
+// terminal or as a program without one, and returns what it printed.
+func runCLI(t *testing.T, terminal bool, stdin string, args ...string) (stdout string, ok bool) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := run(context.Background(), args, stdio{in: strings.NewReader(stdin), out: &out, err: &errOut, terminal: terminal})
+	return out.String() + errOut.String(), code == 0
 }
 
 func writePolicy(t *testing.T, content string) string {
@@ -188,6 +208,100 @@ func TestAskThroughRealProcesses(t *testing.T) {
 	// could not call it.
 	if got := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, `"value": 1`) {
 		t.Errorf("ask = %s, want the value 1", got)
+	}
+}
+
+// TestPersonCommands holds a call through the real server, then plays the
+// person at the command line.
+func TestPersonCommands(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "trace")
+	policy := writePolicy(t, fmt.Sprintf(`{
+		"upstreams": {
+			"calendar": {
+				"command": [%q],
+				"env": {"CLEANROOM_TEST_AS": "upstream", "FAKE_UPSTREAM_TRACE": %q},
+				"labels": [],
+				"tools": {"create_event": {"class": "act", "always_hold": true}},
+			},
+		},
+	}`, os.Args[0], trace))
+
+	ctx := context.Background()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx,
+		&mcp.CommandTransport{Command: cleanroom(t, "serve", "--policy", policy, "--session", "chief")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	for range 2 {
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "calendar_create_event", Arguments: map[string]any{"title": "Reunion"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Content[0].(*mcp.TextContent).Text; !strings.HasPrefix(got, "HELD") {
+			t.Fatalf("create_event = %q, want it held", got)
+		}
+	}
+	// The two held calls are events 1 and 2.
+
+	out, _ := runCLI(t, false, "", "proposals", "--policy", policy)
+	if strings.Count(out, "pending") != 2 || !strings.Contains(out, "calendar.create_event") {
+		t.Errorf("proposals:\n%s", out)
+	}
+
+	// Without a terminal, neither reading nor approving is possible.
+	for _, cmd := range []string{"show", "approve"} {
+		out, ok := runCLI(t, false, "1\n", cmd, "--policy", policy, "1")
+		if ok || !strings.Contains(out, "only works at a terminal") {
+			t.Errorf("%s without a terminal: ok=%v\n%s", cmd, ok, out)
+		}
+	}
+	if _, err := os.Stat(trace); err == nil {
+		t.Fatal("the call ran without a person")
+	}
+
+	out, ok := runCLI(t, true, "", "show", "--policy", policy, "1")
+	if !ok || !strings.Contains(out, `title: "Reunion"`) || !strings.Contains(out, "the policy holds every call") {
+		t.Errorf("show:\n%s", out)
+	}
+
+	// At a terminal, anything but the proposal number cancels.
+	out, _ = runCLI(t, true, "yes\n", "approve", "--policy", policy, "1")
+	if !strings.Contains(out, "Cancelled") {
+		t.Errorf("approve with the wrong confirmation:\n%s", out)
+	}
+	out, ok = runCLI(t, true, "1\n", "approve", "--policy", policy, "1")
+	if !ok || !strings.Contains(out, "The call ran once: done") {
+		t.Errorf("approve:\n%s", out)
+	}
+	if out, ok := runCLI(t, true, "1\n", "approve", "--policy", policy, "1"); ok {
+		t.Errorf("a second approve succeeded:\n%s", out)
+	}
+	ran, _ := os.ReadFile(trace)
+	if got, want := string(ran), "create_event {\"title\":\"Reunion\"}\n"; got != want {
+		t.Errorf("the upstream ran %q, want exactly %q", got, want)
+	}
+
+	// Denying needs no terminal: it can only make things safer.
+	if out, ok := runCLI(t, false, "", "deny", "--policy", policy, "2"); !ok || !strings.Contains(out, "will never run") {
+		t.Errorf("deny:\n%s", out)
+	}
+	out, _ = runCLI(t, false, "", "proposals", "--policy", policy)
+	if !strings.Contains(out, "done") || !strings.Contains(out, "denied") {
+		t.Errorf("proposals after deciding:\n%s", out)
+	}
+
+	out, ok = runCLI(t, false, "", "explain", "--policy", policy, "1")
+	if !ok || !strings.Contains(out, "Decision: hold (class act)") || !strings.Contains(out, "It matches the decision recorded at the time") {
+		t.Errorf("explain:\n%s", out)
+	}
+	if out, _ := runCLI(t, false, "", "log", "--policy", policy); !strings.Contains(out, "the person approved proposal 1") {
+		t.Errorf("log:\n%s", out)
+	}
+	for _, args := range [][]string{{"show", "--policy", policy}, {"show", "--policy", policy, "x"}, {"explain", "--policy", policy, "99"}, {"deny", "--policy", policy, "3"}} {
+		if out, ok := runCLI(t, true, "", args...); ok {
+			t.Errorf("cleanroom %v succeeded:\n%s", args, out)
+		}
 	}
 }
 

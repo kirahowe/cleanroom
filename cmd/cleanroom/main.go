@@ -6,6 +6,16 @@
 //	cleanroom serve [flags]          run the MCP server on stdin and stdout
 //	cleanroom reader-tools --ask N   serve one reader's tools (started by cleanroom)
 //
+// For the person:
+//
+//	cleanroom proposals    list held calls
+//	cleanroom answers      list free-text answers
+//	cleanroom show N       read a held call or an answer (terminal only)
+//	cleanroom approve N    approve a held call and run it once (terminal only)
+//	cleanroom deny N       deny a held call
+//	cleanroom log          list every event
+//	cleanroom explain N    replay the decision made about call N
+//
 // Every command takes --policy and --state, which default to the
 // CLEANROOM_POLICY and CLEANROOM_STATE environment variables.
 package main
@@ -21,6 +31,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"cleanroom/internal/config"
 	"cleanroom/internal/eventlog"
 )
@@ -30,7 +42,8 @@ func main() {
 	log.SetPrefix("cleanroom: ")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+	terminal := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+	os.Exit(run(ctx, os.Args[1:], stdio{in: os.Stdin, out: os.Stdout, err: os.Stderr, terminal: terminal}))
 }
 
 // command is one subcommand. It registers its flags on fs and returns the
@@ -44,14 +57,32 @@ type command struct {
 var commands = []command{
 	{"serve", "run the MCP server on stdin and stdout", serveCommand},
 	{"reader-tools", "serve one reader's tools on stdin and stdout (started by cleanroom)", readerToolsCommand},
+	{"proposals", "list held calls and where they stand", proposalsCommand},
+	{"answers", "list free-text answers delivered to you", answersCommand},
+	{"show", "read a held call or an answer: show N (terminal only)", showCommand},
+	{"approve", "approve a held call and run it once: approve N (terminal only)", approveCommand},
+	{"deny", "deny a held call: deny N", denyCommand},
+	{"log", "list every event", logCommand},
+	{"explain", "replay the decision made about a call: explain N", explainCommand},
+}
+
+// stdio is where a command reads and writes.
+type stdio struct {
+	in       io.Reader
+	out, err io.Writer
+	// terminal reports whether a person is at the other end of both in
+	// and out.
+	terminal bool
 }
 
 // common holds what every command needs.
 type common struct {
 	policyPath string
 	stateDir   string
+	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
+	terminal   bool
 }
 
 // open loads the policy and opens the log. The state directory defaults to
@@ -79,7 +110,8 @@ func (c *common) open() (*config.Config, *eventlog.Log, error) {
 	return cfg, events, nil
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, io stdio) int {
+	stdout, stderr := io.out, io.err
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		usage(stderr)
 		return 2
@@ -88,7 +120,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if cmd.name != args[0] {
 			continue
 		}
-		c := &common{stdout: stdout, stderr: stderr}
+		c := &common{stdin: io.in, stdout: stdout, stderr: stderr, terminal: io.terminal}
 		fs := flag.NewFlagSet("cleanroom "+cmd.name, flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		fs.StringVar(&c.policyPath, "policy", os.Getenv("CLEANROOM_POLICY"), "path to the policy file")

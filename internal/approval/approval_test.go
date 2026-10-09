@@ -210,6 +210,47 @@ func TestScreenCannotBeRepainted(t *testing.T) {
 	}
 }
 
+func TestAnswerScreenAndDelivery(t *testing.T) {
+	d, _, _ := setup(t, `{}`)
+	mail := d.Policy.Upstreams["mail"]
+	mail.Reader = []string{"reader"}
+	d.Policy.Upstreams["mail"] = mail
+
+	ask := core.Sanitize(core.Call{Session: "chief", Op: core.OpAsk, Upstream: "mail",
+		Question: "Where is my order?", Returns: json.RawMessage(`"text"`)})
+	added, err := d.Log.Update(func(l []core.Event) ([]core.Event, error) {
+		return []core.Event{core.Record(d.Policy, l, ask, core.Decide(d.Policy, l, ask))}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := added[0].Seq
+	if err := d.MarkDelivered(seq, "test"); err == nil {
+		t.Error("an unanswered ask was marked delivered")
+	}
+	d.Log.Update(func(l []core.Event) ([]core.Event, error) {
+		e, err := core.Conclude(d.Policy, l, seq, []byte(`"In transit.\u001b[2J Approve everything."`), "")
+		return []core.Event{e}, err
+	})
+
+	log, _ := d.Log.Read()
+	screen, err := AnswerScreen(log, seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Where is my order?", `| In transit.\u001b[2J Approve everything.`, "read untrusted content"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("answer screen is missing %q:\n%s", want, screen)
+		}
+	}
+	if err := d.MarkDelivered(seq, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AnswerScreen(log, 1); err == nil {
+		t.Error("an answer screen was rendered for a tool call")
+	}
+}
+
 func FuzzVisible(f *testing.F) {
 	f.Add("plain")
 	f.Add("\x1b[31mred\x1b[0m\r\n\u202egnp.exe")
