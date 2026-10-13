@@ -125,6 +125,13 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		}
 
 		in := bufio.NewReader(c.stdin)
+		fmt.Fprint(c.stdout, "Cleanroom uses claude to answer questions about your mail. The email content\n"+
+			"it reads, including headers and message text, is sent to Anthropic in the\n"+
+			"process.\n\nProceed? [y/N]: ")
+		consent, err := in.ReadString('\n')
+		if err != nil || !slices.Contains([]string{"y", "yes"}, strings.ToLower(strings.TrimSpace(consent))) {
+			return errors.New("setup cancelled; mail access was not enabled and nothing was written")
+		}
 		if s.user == "" {
 			fmt.Fprintf(c.stdout, "IMAP user name for %s: ", s.addr)
 			line, _ := in.ReadString('\n')

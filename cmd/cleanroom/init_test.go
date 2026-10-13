@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,11 +39,11 @@ func TestInit(t *testing.T) {
 	policy := filepath.Join(home, "cleanroom", "policy.jsonc")
 	passwordFile := filepath.Join(home, "cleanroom", "imap-password")
 
-	out, ok := runCLI(t, true, "kira@example.com\n", "init", "--policy", policy, "--bin-dir", bin)
+	out, ok := runCLI(t, true, "yes\nkira@example.com\n", "init", "--policy", policy, "--bin-dir", bin)
 	if !ok {
 		t.Fatal(out)
 	}
-	for _, want := range []string{"holds 3 messages", policy, "cleanroom ask"} {
+	for _, want := range []string{"Cleanroom uses claude to answer questions about your mail. The email content\nit reads, including headers and message text, is sent to Anthropic in the\nprocess.\n\nProceed? [y/N]:", "holds 3 messages", policy, "cleanroom ask"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -109,7 +111,7 @@ func readFile(t *testing.T, path string) string {
 func TestInitWritesNothingWhenTheLoginFails(t *testing.T) {
 	bin := fakeBinDir(t, false)
 	dir := filepath.Join(t.TempDir(), "cleanroom")
-	out, ok := runCLI(t, true, "", "init", "--policy", filepath.Join(dir, "policy.jsonc"), "--bin-dir", bin, "--imap-user", "kira")
+	out, ok := runCLI(t, true, "Y\n", "init", "--policy", filepath.Join(dir, "policy.jsonc"), "--bin-dir", bin, "--imap-user", "kira")
 	if ok || !strings.Contains(out, "no such user") || !strings.Contains(out, "nothing was written") {
 		t.Errorf("got %v:\n%s", ok, out)
 	}
@@ -129,7 +131,7 @@ func TestInitRefusals(t *testing.T) {
 		want     string
 	}{
 		"not a terminal":    {false, "kira\n", []string{"--bin-dir", bin}, "only works at a terminal"},
-		"no user name":      {true, "\n", []string{"--bin-dir", bin}, "no user name"},
+		"no user name":      {true, "yes\n\n", []string{"--bin-dir", bin}, "no user name"},
 		"programs missing":  {true, "kira\n", []string{"--bin-dir", t.TempDir()}, "make build"},
 		"password argument": {true, "kira\n", []string{"--bin-dir", bin, "--imap-password", "hunter2"}, "flag provided but not defined"},
 	} {
@@ -137,6 +139,37 @@ func TestInitRefusals(t *testing.T) {
 		if out, ok := runCLI(t, tc.terminal, tc.stdin, args...); ok || !strings.Contains(out, tc.want) {
 			t.Errorf("%s: %v, want an error mentioning %q:\n%s", name, ok, tc.want, out)
 		}
+	}
+}
+
+func TestInitRequiresConsentBeforeCredentialsOrMailAccess(t *testing.T) {
+	for name, input := range map[string]string{
+		"decline": "no\n", "default": "\n", "EOF": "", "incomplete": "yes",
+		"unrecognised": "maybe\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			bin := fakeBinDir(t, true)
+			dir := filepath.Join(t.TempDir(), "cleanroom")
+			var out bytes.Buffer
+			code := run(context.Background(), []string{"init", "--policy", filepath.Join(dir, "policy.jsonc"), "--bin-dir", bin}, stdio{
+				stdin: strings.NewReader(input), stdout: &out, stderr: &out, terminal: true,
+				readPassword: func() (string, error) {
+					t.Fatal("requested a password without consent")
+					return "", nil
+				},
+			})
+			if code == 0 || !strings.Contains(out.String(), "setup cancelled") || !strings.Contains(out.String(), "Anthropic") {
+				t.Fatalf("exit %d: %s", code, out.String())
+			}
+			if strings.Contains(out.String(), "IMAP user name") {
+				t.Error("requested a user name without consent")
+			}
+			for _, path := range []string{dir, filepath.Join(bin, "args")} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Errorf("setup created %s or contacted mail-source without consent: %v", path, err)
+				}
+			}
+		})
 	}
 }
 

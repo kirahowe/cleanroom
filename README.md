@@ -315,10 +315,11 @@ bin/cleanroom init      # asks for consent, then IMAP credentials
 bin/cleanroom ask "When is my next dentist appointment?"
 ```
 
-`init` first explains that the reader sends email headers and message text
-to Anthropic, including for typed questions. Enter `y` or `yes` to allow
-this for questions using the setup. Any other response cancels before
-credentials are requested, files are written or the mailbox is contacted.
+`init` asks permission to send email content to Anthropic's Claude to answer
+your questions. This includes headers and message text. Enter `y` or `yes`
+to allow this for future questions about the mailbox. Any other response
+cancels before credentials are requested, files are written or the mailbox
+is contacted.
 Once accepted, setup continues and later questions do not prompt again.
 
 `init` defaults to Proton Mail Bridge's address (`127.0.0.1:1143`, STARTTLS);
