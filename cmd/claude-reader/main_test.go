@@ -22,6 +22,7 @@ func fakeClaude(t *testing.T, dir, output string, exit int) string {
 printf '%s\n' "$@" > "` + dir + `/args"
 cat > "` + dir + `/stdin"
 pwd > "` + dir + `/cwd"
+printf '%s' "$CLAUDE_CONFIG_DIR" > "` + dir + `/config-dir"
 ls -A | wc -l | tr -d ' ' > "` + dir + `/cwd-entries"
 cat "` + dir + `/output"
 exit ` + strconv.Itoa(exit) + "\n"
@@ -62,9 +63,16 @@ func TestRun(t *testing.T) {
 	config := mcpConfig(t, oneServer)
 	now := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 
+	// The session uses the login the environment selects, so it has to
+	// inherit the environment unchanged.
+	t.Setenv("CLAUDE_CONFIG_DIR", "/somewhere/else")
+
 	answer, report, err := run(context.Background(), claude, "sonnet", config, "--when is the reunion?", `"date"`, now)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := recorded(t, dir, "config-dir"); got != "/somewhere/else" {
+		t.Errorf("Claude Code saw CLAUDE_CONFIG_DIR=%q", got)
 	}
 	if string(answer) != `{"answer":"2027-07-17"}` {
 		t.Errorf("answer = %s", answer)
