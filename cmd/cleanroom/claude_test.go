@@ -17,11 +17,7 @@ func fakeClaude(t *testing.T) (path, argsFile string) {
 	t.Helper()
 	dir := t.TempDir()
 	path, argsFile = filepath.Join(dir, "claude"), filepath.Join(dir, "args")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + argsFile + "\"\n" +
-		"printf '%s' \"$CLAUDE_CONFIG_DIR\" > \"" + dir + "/config-dir\"\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	linkFake(t, "claude", path)
 	return path, argsFile
 }
 

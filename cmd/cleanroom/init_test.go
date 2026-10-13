@@ -18,19 +18,32 @@ import (
 func fakeBinDir(t *testing.T, checkSucceeds bool) string {
 	t.Helper()
 	dir := t.TempDir()
-	outcome := `echo "Logged in. Mailbox is open read-only and holds 3 messages."`
+	linkFake(t, "mail-source", filepath.Join(dir, "mail-source"))
+	files := map[string]string{"claude-reader": "#!/bin/sh\n"}
 	if !checkSucceeds {
-		outcome = `echo "logging in to the mail server: no such user" >&2; exit 1`
+		files["login-fails"] = ""
 	}
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\n" +
-		"while [ $# -gt 0 ]; do [ \"$1\" = --imap-password-file ] && cat \"$2\" > \"" + dir + "/password-seen\"; shift; done\n" +
-		outcome + "\n"
-	for name, content := range map[string]string{"mail-source": script, "claude-reader": "#!/bin/sh\n"} {
+	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return dir
+}
+
+// linkFake puts a stand-in program from testdata at path, as a link. The
+// program finds the test's directory from the name it was run by. A script
+// written afresh for each test would do, but macOS checks a new executable
+// the first time it runs, which takes over a hundred milliseconds.
+func linkFake(t *testing.T, name, path string) {
+	t.Helper()
+	fake, err := filepath.Abs(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fake, path); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInit(t *testing.T) {

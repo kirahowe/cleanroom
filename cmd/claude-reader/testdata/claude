@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stands in for Claude Code in tests. A test links to it from a directory
+# of its own. It records there its arguments, stdin and working directory,
+# then prints that directory's output file and exits with the status in
+# its exit file.
+dir=$(dirname "$0")
+printf '%s\n' "$@" > "$dir/args"
+cat > "$dir/stdin"
+pwd > "$dir/cwd"
+while [ $# -gt 0 ]; do [ "$1" = --mcp-config ] && cat "$2" > "$dir/mcp-config"; shift; done
+printf '%s' "$CLAUDE_CONFIG_DIR" > "$dir/config-dir"
+ls -A | wc -l | tr -d ' ' > "$dir/cwd-entries"
+cat "$dir/output"
+exit "$(cat "$dir/exit")"

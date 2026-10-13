@@ -17,25 +17,24 @@ import (
 	"cleanroom/internal/typed"
 )
 
-// fakeClaude writes a script that stands in for Claude Code. It records
-// its arguments, stdin and working directory under dir, then prints output.
+// fakeClaude puts a stand-in for Claude Code in dir. It records its
+// arguments, stdin and working directory there, then prints output.
+//
+// It is a link to a script in testdata, which finds dir from the name it
+// was run by. A script written afresh for each test would do, but macOS
+// checks a new executable the first time it runs, which takes over a
+// hundred milliseconds.
 func fakeClaude(t *testing.T, dir, output string, exit int) string {
 	t.Helper()
-	script := `#!/bin/sh
-printf '%s\n' "$@" > "` + dir + `/args"
-cat > "` + dir + `/stdin"
-pwd > "` + dir + `/cwd"
-while [ $# -gt 0 ]; do [ "$1" = --mcp-config ] && cat "$2" > "` + dir + `/mcp-config"; shift; done
-cat "` + dir + `/stderr" >&2
-printf '%s' "$CLAUDE_CONFIG_DIR" > "` + dir + `/config-dir"
-ls -A | wc -l | tr -d ' ' > "` + dir + `/cwd-entries"
-cat "` + dir + `/output"
-exit ` + strconv.Itoa(exit) + "\n"
-	path := filepath.Join(dir, "claude")
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	fake, err := filepath.Abs(filepath.Join("testdata", "claude"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"output": output, "stderr": ""} {
+	path := filepath.Join(dir, "claude")
+	if err := os.Symlink(fake, path); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"output": output, "exit": strconv.Itoa(exit)} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}

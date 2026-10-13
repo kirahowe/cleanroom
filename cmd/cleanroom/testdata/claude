@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stands in for Claude Code in tests. A test links to it from a directory
+# of its own, and it records there what it was run with.
+dir=$(dirname "$0")
+printf '%s\n' "$@" > "$dir/args"
+printf '%s' "$CLAUDE_CONFIG_DIR" > "$dir/config-dir"

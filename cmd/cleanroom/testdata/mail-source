@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stands in for mail-source in tests. A test links to it from a directory
+# of its own, and it records there what it was run with. It fails the login
+# if that directory has a file named login-fails.
+dir=$(dirname "$0")
+printf '%s\n' "$@" > "$dir/args"
+while [ $# -gt 0 ]; do [ "$1" = --imap-password-file ] && cat "$2" > "$dir/password-seen"; shift; done
+if [ -e "$dir/login-fails" ]; then
+	echo "logging in to the mail server: no such user" >&2
+	exit 1
+fi
+echo "Logged in. Mailbox is open read-only and holds 3 messages."
