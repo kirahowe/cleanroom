@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -98,6 +99,28 @@ func TestApproveRunsTheStoredCallOnce(t *testing.T) {
 	}
 	if got := d.proposal(t, held).Status; got != core.Done {
 		t.Errorf("status = %s, want done", got)
+	}
+}
+
+// An approval interrupted before it is recorded leaves the call held, so
+// the person can approve it again.
+func TestCancelledApprovalLeavesTheCallHeld(t *testing.T) {
+	d, mail, held := setup(t, `{"to":["supplier@example.com"],"body":"Where is it?"}`)
+	hash := d.proposal(t, held).Call.Hash
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := d.Approve(ctx, held, hash, "test"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Approve = %v, want context.Canceled", err)
+	}
+	if got := d.proposal(t, held).Status; got != core.Pending {
+		t.Errorf("status = %s, want pending", got)
+	}
+	if got := len(mail.Seen()); got != 0 {
+		t.Errorf("the upstream saw %d sends, want none", got)
+	}
+	if status, err := d.Approve(context.Background(), held, hash, "test"); err != nil || status != core.Done {
+		t.Errorf("approving afterwards = %s, %v", status, err)
 	}
 }
 

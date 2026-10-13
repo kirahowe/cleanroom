@@ -33,6 +33,12 @@ func (d *Desk) Deny(seq int, via string) error {
 // twice. If cleanroom dies between the approval and the effect, the
 // proposal stays "approved" and is not retried: at most once, never twice.
 func (d *Desk) Approve(ctx context.Context, seq int, hash, via string) (core.Status, error) {
+	// Recording the approval spends the proposal. A context cancelled
+	// before that leaves it held. One cancelled after would fail the call
+	// and spend the proposal on nothing.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	pr, err := d.resolve(seq, hash, true, via)
 	if err != nil {
 		return "", err
