@@ -21,7 +21,7 @@ func TestAskFromTheCommandLine(t *testing.T) {
 	// At a terminal: the screen a person reads. Flags count after the
 	// question too, and stay out of it.
 	out, ok = runCLI(t, true, "", "ask", "How many tools can you see?", "--policy", policy, "--returns", "number")
-	if !ok || !strings.Contains(out, "│ How many tools can you see?\n") || !strings.Contains(out, "Answer (a checked value): 1") {
+	if !ok || !strings.Contains(out, "│ How many tools can you see?\n") || !strings.Contains(out, "Answer\n  │ 1\n") {
 		t.Errorf("got %v:\n%s", ok, out)
 	}
 

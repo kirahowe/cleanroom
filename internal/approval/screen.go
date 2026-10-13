@@ -69,7 +69,7 @@ func AnswerScreen(log []core.Event, seq, width int) (string, error) {
 	case ans.Outcome == core.OutcomeNone:
 		fmt.Fprintf(&b, "No answer: %s.\n", visible(ans.Detail))
 	case ans.Outcome == core.OutcomeTyped:
-		fmt.Fprintf(&b, "Answer (a checked value): %s\n", visible(string(ans.Value)))
+		fmt.Fprintf(&b, "Answer\n%s", prose(string(ans.Value), width))
 	default:
 		b.WriteString("Answer\n")
 		b.WriteString(prose(ans.Text, width))
