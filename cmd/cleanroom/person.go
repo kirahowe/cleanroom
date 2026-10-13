@@ -205,7 +205,13 @@ func logTable(events []core.Event, zone *time.Location) string {
 			session = e.Call.Call.Session
 			decision = string(e.Call.Decision.Verdict)
 		}
-		rows = append(rows, fmt.Sprintf("%d\t%s\t%s\t%s\t%s", e.Seq, e.Time.In(zone).Format("15:04:05"), session, core.Summarize(events, e.Seq), decision))
+		what := core.Summarize(events, e.Seq)
+		// A summary is short enough to cite in a note to an agent. The
+		// log has room for the reason an ask came to nothing.
+		if e.Kind == core.KindAnswer && e.Answer.Outcome == core.OutcomeNone && e.Answer.Detail != "" {
+			what = fmt.Sprintf("no answer to ask %d: %s", e.Answer.Ref, e.Answer.Detail)
+		}
+		rows = append(rows, fmt.Sprintf("%d\t%s\t%s\t%s\t%s", e.Seq, e.Time.In(zone).Format("15:04:05"), session, what, decision))
 	}
 	return table("EVENT\tTIME\tSESSION\tWHAT\tDECISION", rows)
 }
