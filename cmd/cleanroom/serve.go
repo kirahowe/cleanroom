@@ -21,38 +21,48 @@ func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	session := fs.String("session", "",
 		"id of the conversation this server belongs to; reuse it when the conversation is resumed")
 	return func(ctx context.Context) error {
-		st, err := c.open()
-		if err != nil {
-			return err
-		}
-		cfg := st.cfg
-		children, err := st.childLog()
-		if err != nil {
-			return err
-		}
-		defer children.Close()
 		if *session == "" {
 			*session = newSessionID()
 			fmt.Fprintf(c.stderr, "cleanroom: no --session given, using %s. "+
 				"If this conversation is resumed in a new process it will start clean; pass --session to prevent that.\n", *session)
 		}
-		upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir, children))
-		defer upstreams.Close()
-		readers, err := commandReaders(cfg, log.New(children, "", log.LstdFlags).Printf)
+		g, closeGateway, err := c.gateway(*session)
 		if err != nil {
 			return err
 		}
-		g := &gateway.Gateway{
-			Policy: cfg.Policy, Log: st.log, Session: *session,
-			Upstreams: upstreams, Readers: readers,
-			Logf: log.Printf,
-		}
+		defer closeGateway()
 		server, err := g.Server(ctx)
 		if err != nil {
 			return err
 		}
 		return server.Run(ctx, &mcp.StdioTransport{})
 	}
+}
+
+// gateway builds the gateway for one session from the policy, with its
+// upstream connections and readers. The returned function releases them.
+func (c *common) gateway(session string) (*gateway.Gateway, func(), error) {
+	st, err := c.open()
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := st.cfg
+	children, err := st.childLog()
+	if err != nil {
+		return nil, nil, err
+	}
+	readers, err := commandReaders(cfg, log.New(children, "", log.LstdFlags).Printf)
+	if err != nil {
+		children.Close()
+		return nil, nil, err
+	}
+	upstreams := upstream.New(cfg.Policy, upstream.CommandDialer(cfg.Dir, children))
+	g := &gateway.Gateway{
+		Policy: cfg.Policy, Log: st.log, Session: session,
+		Upstreams: upstreams, Readers: readers,
+		Logf: log.Printf,
+	}
+	return g, func() { upstreams.Close(); children.Close() }, nil
 }
 
 // commandReaders builds the reader for each source that has one in the

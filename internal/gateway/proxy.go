@@ -183,11 +183,15 @@ Call status to see the outcome. Do not retry: a retry would only be held again.`
 }
 
 func refusedResult(d core.Decision) *mcp.CallToolResult {
+	return errorResult(refusalText(d))
+}
+
+func refusalText(d core.Decision) string {
 	var reasons []string
 	for _, r := range d.Reasons {
 		reasons = append(reasons, r.Text)
 	}
-	return errorResult("REFUSED: " + strings.Join(reasons, " "))
+	return "REFUSED: " + strings.Join(reasons, " ")
 }
 
 // explain renders a decision's reasons, naming the events they cite.

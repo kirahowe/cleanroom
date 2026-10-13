@@ -306,20 +306,37 @@ source's labels to the calling session.
 
 ## Using it on your own mail
 
-Two commands set up one IMAP mailbox and start a conversation about it:
+Two commands set up one IMAP mailbox and ask it a question:
 
 ```sh
 make build
 bin/cleanroom init      # asks for the IMAP user name and password
-bin/cleanroom claude    # Claude Code with cleanroom as its only tools
+bin/cleanroom ask "When is my next dentist appointment?"
 ```
 
 `init` defaults to Proton Mail Bridge's address (`127.0.0.1:1143`, STARTTLS);
 `--imap-addr`, `--imap-tls` and `--imap-mailbox` change that. It logs in before
 it writes anything. On success it writes `~/.config/cleanroom/policy.jsonc`
-and, beside it, the password in a file only you can read. The policy uses
-`claude-reader`, so the mail a question touches is sent to Anthropic. `init`
-needs a terminal and takes the password only from the keyboard.
+and, beside it, the password in a file only you can read. `init` needs a
+terminal and takes the password only from the keyboard.
+
+`ask` puts the question through the gateway as an agent's ask would go: the
+ask is decided and recorded, a reader searches and reads, and the answer is
+checked. The policy `init` writes uses `claude-reader`, so the mail a
+question touches is sent to Anthropic. `--returns` asks for a checked type
+(`date`, `datetime`, `number`, `money`, `boolean`, or a JSON spec) in place
+of free text.
+
+At a terminal, `ask` prints the answer on the screen `cleanroom show` uses.
+Without a terminal it prints what the ask tool returns, so a program or an
+agent that runs it gets a checked value, and for free text only an id.
+`cleanroom log` lists what the reader did, without content.
+
+### A conversation in Claude Code
+
+```sh
+bin/cleanroom claude    # Claude Code with cleanroom as its only tools
+```
 
 `claude` starts Claude Code with no built-in tools and no MCP server but
 cleanroom. The conversation and the cleanroom session share one id. When the

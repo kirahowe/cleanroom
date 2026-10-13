@@ -85,8 +85,9 @@ func initReport(policyPath, passwordFile, check string) string {
 	return check + "\n\n" +
 		"Wrote " + policyPath + "\n" +
 		"Wrote " + passwordFile + " (only you can read it)\n\n" +
-		"Start a conversation that can ask about your mail:\n\n" +
-		"    cleanroom claude\n"
+		"Ask your mail something:\n\n" +
+		"    cleanroom ask \"When is my next dentist appointment?\"\n" +
+		"    cleanroom ask --returns date \"When is my next dentist appointment?\"\n"
 }
 
 // initCommand sets cleanroom up for one IMAP mailbox. It asks for the user
