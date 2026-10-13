@@ -5,6 +5,7 @@ package reader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -191,6 +192,13 @@ func TestCommandFailures(t *testing.T) {
 				t.Errorf("Answer = %q, want an error", raw)
 			}
 		})
+	}
+}
+
+func TestCommandReportsBlockedTools(t *testing.T) {
+	c := &Command{Argv: []string{script(t, `exit 78`)}, Pipe: []string{"x"}}
+	if _, err := c.Answer(context.Background(), Job{Ask: 1, Source: "mail"}); !errors.Is(err, ErrToolsBlocked) {
+		t.Errorf("Answer failed with %v, want ErrToolsBlocked", err)
 	}
 }
 

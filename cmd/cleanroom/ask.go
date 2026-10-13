@@ -10,6 +10,7 @@ import (
 
 	"cleanroom/internal/approval"
 	"cleanroom/internal/core"
+	"cleanroom/internal/reader"
 )
 
 // askCommand asks one question from the command line. The ask goes through
@@ -64,8 +65,16 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			return err
 		}
 		fmt.Fprint(c.stdout, "\n"+screen)
-		fmt.Fprintf(c.stdout, "\nWhat the reader did: cleanroom log\n")
 		ans, ok := core.AnswerTo(events, res.ID)
+		if ok && ans.Outcome == core.OutcomeNone && ans.Detail == reader.ErrToolsBlocked.Error() {
+			self, err := selfPath()
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(c.stdout, toolsBlockedHelp([]string{self, "reader-tools"}, allowlistFile(claudeSettingsFiles())))
+			return nil
+		}
+		fmt.Fprintf(c.stdout, "\nWhat the reader did: cleanroom log\n")
 		if ok && ans.Outcome == core.OutcomeNone && strings.HasPrefix(ans.Detail, "the reader failed") {
 			fmt.Fprint(c.stdout, readerFailedHelp)
 		}
@@ -77,17 +86,10 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	}
 }
 
-// readerFailedHelp names the usual reason a reader backed by Claude Code
-// fails on a new setup.
+// readerFailedHelp is for a failure the reader gave no reason for.
 const readerFailedHelp = `
 The reader did not finish. Its own messages are in children.log, in the state
 directory beside the policy.
-
-If your Claude Code settings list the MCP servers that are allowed, the reader
-cannot load its tools until its command is on that list. This prints the
-entries to add:
-
-    cleanroom claude-settings
 `
 
 // returnsSpec turns the --returns flag into the JSON the ask takes. A bare

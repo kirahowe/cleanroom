@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 
 	"cleanroom/internal/config"
 )
@@ -130,13 +131,16 @@ func claudeSettingsCommand(fs *flag.FlagSet, c *common) func(context.Context) er
 	}
 }
 
-// claudeSettingsText names each command exactly. An entry that allowed a
-// server by its name would allow any server given that name.
+// allowEntry is the "allowedMcpServers" entry for one command. It names the
+// command exactly. An entry that allowed a server by its name would allow
+// any server given that name.
+func allowEntry(argv []string) string {
+	b, _ := json.Marshal(argv)
+	return `    { "serverCommand": ` + string(b) + ` }`
+}
+
 func claudeSettingsText(readerTools, serve []string) string {
-	entry := func(argv []string) string {
-		b, _ := json.Marshal(argv)
-		return `    { "serverCommand": ` + string(b) + ` }`
-	}
+	entry := allowEntry
 	return "Claude Code starts cleanroom as an MCP server in two places. If your Claude Code\n" +
 		"settings have an \"allowedMcpServers\" list, add these entries to it:\n\n" +
 		entry(readerTools) + ",\n" + entry(serve) + "\n\n" +
@@ -166,4 +170,59 @@ func newUUID() string {
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// claudeSettingsFiles lists the settings files Claude Code reads for a
+// session started outside any project, as the reader's is: the user's, then
+// the one an administrator manages. CLAUDE_CONFIG_DIR is Claude Code's own
+// variable for moving the user's directory, and the reader's session
+// inherits it.
+func claudeSettingsFiles() []string {
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		dir = filepath.Join(home, ".claude")
+	}
+	managed := "/etc/claude-code/managed-settings.json"
+	if runtime.GOOS == "darwin" {
+		managed = "/Library/Application Support/ClaudeCode/managed-settings.json"
+	}
+	return []string{filepath.Join(dir, "settings.json"), managed}
+}
+
+// allowlistFile returns the first of the files that has an
+// "allowedMcpServers" list, or "" when none does.
+func allowlistFile(files []string) string {
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		var settings map[string]json.RawMessage
+		if json.Unmarshal(raw, &settings) != nil {
+			continue
+		}
+		if _, ok := settings["allowedMcpServers"]; ok {
+			return file
+		}
+	}
+	return ""
+}
+
+// toolsBlockedHelp tells a person whose Claude Code settings kept the
+// reader from its tools what to add, and to which file when it was found.
+func toolsBlockedHelp(readerTools []string, file string) string {
+	where := "your Claude Code settings.json"
+	if file != "" {
+		where = file
+	}
+	return "\nClaude Code would not start cleanroom's MCP server, so the reader could not\n" +
+		"read anything. Your Claude Code settings list the MCP servers that are allowed,\n" +
+		"and this one is not on the list.\n\n" +
+		"To allow it, add this entry to \"allowedMcpServers\" in\n" + where + ":\n\n" +
+		allowEntry(readerTools) + "\n\n" +
+		"The entry allows that exact command and no other. Then ask again.\n"
 }

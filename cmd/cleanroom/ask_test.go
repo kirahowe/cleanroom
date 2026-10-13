@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,26 +68,95 @@ func TestReturnsSpec(t *testing.T) {
 }
 
 // A reader that fails gives no answer. At a terminal the person is told
-// where to look and what the usual cause is.
+// where to look.
 func TestAskExplainsAFailedReader(t *testing.T) {
-	policy := writePolicy(t, fmt.Sprintf(`{
+	policy := readerPolicy(t, `"false"`)
+	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	if !ok || !strings.Contains(out, "No answer") || !strings.Contains(out, "children.log") {
+		t.Errorf("got %v:\n%s", ok, out)
+	}
+	// An agent is told only that there is no answer.
+	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	if strings.Contains(out, "children.log") || !strings.Contains(out, `"status": "no_answer"`) {
+		t.Errorf("without a terminal:\n%s", out)
+	}
+}
+
+// A reader whose tools Claude Code would not start says so by its exit
+// status. The person is shown the entry to add and the file that has the
+// list.
+func TestAskExplainsBlockedTools(t *testing.T) {
+	policy := readerPolicy(t, `"sh", "-c", "exit 78"`)
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	settings := filepath.Join(configDir, "settings.json")
+	if err := os.WriteFile(settings, []byte(`{"allowedMcpServers": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	self, err := selfPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(self)
+
+	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	for _, want := range []string{
+		"No answer: the reader could not start its tools.",
+		`"allowedMcpServers" in` + "\n" + settings + ":",
+		`{ "serverCommand": [` + string(quoted) + `,"reader-tools"] }`,
+	} {
+		if !ok || !strings.Contains(out, want) {
+			t.Errorf("got %v, want %q in:\n%s", ok, want, out)
+		}
+	}
+	if strings.Contains(out, "children.log") {
+		t.Errorf("sent the person to the reader's log for a cause that is known:\n%s", out)
+	}
+
+	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	if strings.Contains(out, "allowedMcpServers") || !strings.Contains(out, `"status": "no_answer"`) {
+		t.Errorf("without a terminal:\n%s", out)
+	}
+}
+
+func TestAllowlistFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	without := write("without.json", `{"model": "opus"}`)
+	broken := write("broken.json", `{"allowedMcpServers": [`)
+	with := write("with.json", `{"allowedMcpServers": []}`)
+	missing := filepath.Join(dir, "missing.json")
+
+	if got := allowlistFile([]string{missing, without, broken, with}); got != with {
+		t.Errorf("allowlistFile = %q, want %q", got, with)
+	}
+	if got := allowlistFile([]string{missing, without}); got != "" {
+		t.Errorf("allowlistFile = %q, want none", got)
+	}
+	if help := toolsBlockedHelp([]string{"/bin/cleanroom", "reader-tools"}, ""); !strings.Contains(help, "your Claude Code settings.json:") {
+		t.Errorf("help without a file:\n%s", help)
+	}
+}
+
+// readerPolicy is a policy whose one source has the given reader command,
+// written as the elements of a JSON array.
+func readerPolicy(t *testing.T, reader string) string {
+	t.Helper()
+	return writePolicy(t, fmt.Sprintf(`{
 		"upstreams": {
 			"calendar": {
 				"command": [%q],
 				"env": {"CLEANROOM_TEST_AS": "upstream"},
 				"labels": [],
-				"reader": ["false"],
+				"reader": [%s],
 				"tools": {"list_events": {"class": "read"}},
 			},
 		},
-	}`, os.Args[0]))
-	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
-	if !ok || !strings.Contains(out, "No answer") || !strings.Contains(out, "cleanroom claude-settings") || !strings.Contains(out, "children.log") {
-		t.Errorf("got %v:\n%s", ok, out)
-	}
-	// An agent is told only that there is no answer.
-	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
-	if strings.Contains(out, "claude-settings") || !strings.Contains(out, `"status": "no_answer"`) {
-		t.Errorf("without a terminal:\n%s", out)
-	}
+	}`, os.Args[0], reader))
 }

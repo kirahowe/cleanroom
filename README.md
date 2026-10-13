@@ -163,6 +163,10 @@ the reader to one source through `cleanroom reader-tools` and a temporary Unix
 socket, whose path is in the server's `env` block. The gateway authorizes each call and reuses its upstream connections.
 The socket closes when the question finishes.
 
+A reader whose MCP client refuses to start that server exits with status 78.
+Cleanroom shows nobody what a reader writes, so the status is how `ask` learns
+the cause and can tell the person what to allow.
+
 The demo reader in `demo/reader` uses keywords and regular expressions and
 knows only the demo's questions.
 
@@ -369,7 +373,9 @@ server can be given a name.
 The entry pins the path and arguments, not the file's contents. Whoever can
 replace the binary at that path can run something else under the entry.
 
-Until the reader's entry is there, `ask` reports no answer and says why.
+Until the reader's entry is there, `ask` reports no answer. At a terminal it
+also prints the entry and names the settings file that has the list: your
+user `settings.json`, or the managed settings file.
 
 ### From a coding session
 

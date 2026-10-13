@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -248,7 +249,7 @@ func TestRunWhenTheToolsAreBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now())
-	if err == nil || !strings.Contains(err.Error(), `{ "serverCommand": ["/bin/cleanroom","reader-tools"] }`) || !strings.Contains(err.Error(), "allowedMcpServers") {
+	if !errors.Is(err, errToolsBlocked) || !strings.Contains(err.Error(), `{ "serverCommand": ["/bin/cleanroom","reader-tools"] }`) || !strings.Contains(err.Error(), "allowedMcpServers") {
 		t.Errorf("got %s, %v", answer, err)
 	}
 }

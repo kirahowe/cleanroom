@@ -70,6 +70,17 @@ type Command struct {
 // which socket to join.
 const SocketEnv = "CLEANROOM_READER_SOCKET"
 
+// ExitToolsBlocked is the status a reader exits with when its MCP client
+// would not start the Pipe command, which leaves it nothing to read with.
+// The status is how a reader reports this, because cleanroom shows nobody
+// what a reader writes. A reader that exits with it falsely gets the person
+// a setup hint that cleanroom wrote, and nothing else.
+const ExitToolsBlocked = 78
+
+// ErrToolsBlocked is what Answer returns for a reader that exited with
+// ExitToolsBlocked.
+var ErrToolsBlocked = errors.New("the reader could not start its tools")
+
 // Answer runs the command and returns the answer it printed.
 func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	tmp, err := os.MkdirTemp("", "cleanroom-reader-")
@@ -128,6 +139,10 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, errors.New("the reader ran out of time")
+		}
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == ExitToolsBlocked {
+			return nil, ErrToolsBlocked
 		}
 		return nil, fmt.Errorf("the reader failed: %w", err)
 	}

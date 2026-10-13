@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"cleanroom/internal/reader"
 	"cleanroom/internal/typed"
 )
 
@@ -54,6 +55,10 @@ func main() {
 	answer, report, err := run(ctx, *claude, *model, *configPath, *question, *returns, time.Now())
 	if report != "" {
 		log.Print(report)
+	}
+	if errors.Is(err, errToolsBlocked) {
+		log.Print(err)
+		os.Exit(reader.ExitToolsBlocked)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -105,7 +110,7 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
 	if strings.Contains(stderr.String(), "MCP server blocked") {
-		return nil, "", errors.New(blockedHelp(server))
+		return nil, "", fmt.Errorf("%w.\n%s", errToolsBlocked, blockedHelp(server))
 	}
 
 	result, parseErr := parseResult(stdout.Bytes())
@@ -123,6 +128,8 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	return line, report, err
 }
 
+var errToolsBlocked = errors.New("Claude Code did not load the reader's tools, because its settings list the MCP servers that are allowed")
+
 // blockedHelp says what to do when Claude Code's settings keep the session
 // from loading the source's tools. It names the server's exact command,
 // which is the same for every question.
@@ -133,8 +140,7 @@ func blockedHelp(server json.RawMessage) string {
 	}
 	json.Unmarshal(server, &s) // a server cleanroom wrote; an empty entry is still a usable hint
 	argv, _ := json.Marshal(append([]string{s.Command}, s.Args...))
-	return "Claude Code did not load the reader's tools, because its settings list the MCP servers that are allowed.\n" +
-		"To allow them, add this entry to \"allowedMcpServers\" in Claude Code's settings.json:\n\n" +
+	return "To allow them, add this entry to \"allowedMcpServers\" in Claude Code's settings.json:\n\n" +
 		`    { "serverCommand": ` + string(argv) + " }"
 }
 
