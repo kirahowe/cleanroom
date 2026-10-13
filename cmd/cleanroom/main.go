@@ -15,6 +15,7 @@
 //	cleanroom deny N       deny a held call
 //	cleanroom log          list every event
 //	cleanroom explain N    replay the decision made about call N
+//	cleanroom repair       set aside a last log line that a crash cut off
 //
 // Every command takes --policy and --state, which default to the
 // CLEANROOM_POLICY and CLEANROOM_STATE environment variables.
@@ -65,6 +66,7 @@ var commands = []command{
 	{"deny", "deny a held call: deny N", denyCommand},
 	{"log", "list every event", logCommand},
 	{"explain", "replay the decision made about a call: explain N", explainCommand},
+	{"repair", "set aside a last log line that a crash cut off", repairCommand},
 }
 
 // stdio is where a command reads and writes.

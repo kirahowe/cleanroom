@@ -326,6 +326,33 @@ func TestPersonCommands(t *testing.T) {
 	}
 }
 
+// TestRepairAfterACrash cuts the log's last line short, as a crash in the
+// middle of an append would. Every command fails and says how to recover,
+// and repair recovers.
+func TestRepairAfterACrash(t *testing.T) {
+	policy := testPolicy(t)
+	state := filepath.Join(filepath.Dir(policy), ".cleanroom")
+	if out, ok := runCLI(t, false, "", "repair", "--policy", policy); !ok || !strings.Contains(out, "Nothing to repair") {
+		t.Fatalf("repair on a new log:\n%s", out)
+	}
+	path := filepath.Join(state, "events.jsonl")
+	if err := os.WriteFile(path, []byte(`{"seq":1,"kind":"call","call":{"ca`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, ok := runCLI(t, false, "", "log", "--policy", policy); ok || !strings.Contains(out, "cleanroom repair") {
+		t.Errorf("log on a cut-off file should fail and name the repair command:\n%s", out)
+	}
+	if out, ok := runCLI(t, false, "", "repair", "--policy", policy); !ok || !strings.Contains(out, "Set aside") {
+		t.Fatalf("repair:\n%s", out)
+	}
+	if out, ok := runCLI(t, false, "", "log", "--policy", policy); !ok {
+		t.Errorf("log after the repair:\n%s", out)
+	}
+	if aside, _ := os.ReadFile(path + ".cut-off"); !strings.Contains(string(aside), `"seq":1`) {
+		t.Errorf("the cut-off line was not kept: %q", aside)
+	}
+}
+
 func TestUsageErrors(t *testing.T) {
 	tests := [][]string{
 		{},

@@ -7,12 +7,12 @@ package eventlog
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
@@ -128,23 +128,30 @@ func TestManyProcessesAndGoroutines(t *testing.T) {
 	}
 }
 
+// sound writes a log of nine rounds and returns it with its path and bytes.
+func sound(t *testing.T) (*Log, string, []byte) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := appendRounds(dir, "w", 9); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, FileName)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := Open(dir)
+	return l, path, raw
+}
+
+// lines splits a log into its lines, each with its newline but the last.
+func lines(raw []byte) [][]byte {
+	return bytes.SplitAfter(bytes.TrimSuffix(raw, []byte("\n")), []byte("\n"))
+}
+
 // TestDamagedFilesAreErrors damages a sound log in ways that change its
 // structure. Each must make Read and Update fail and leave the file alone.
 func TestDamagedFilesAreErrors(t *testing.T) {
-	sound := func(t *testing.T) (*Log, string, []byte) {
-		dir := t.TempDir()
-		if err := appendRounds(dir, "w", 9); err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(dir, FileName)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		l, _ := Open(dir)
-		return l, path, raw
-	}
-	lines := func(raw []byte) [][]byte { return bytes.SplitAfter(bytes.TrimSuffix(raw, []byte("\n")), []byte("\n")) }
 
 	damage := map[string]func(raw []byte) []byte{
 		"torn last line":                      func(raw []byte) []byte { return raw[:len(raw)-7] },
@@ -208,23 +215,99 @@ func TestDamagedFilesAreErrors(t *testing.T) {
 		})
 	}
 
+	// A whole event that lost its newline is still an event. Appending
+	// after it used to put two events on one line, which made the log
+	// unreadable for good.
 	t.Run("whole last line without its newline", func(t *testing.T) {
 		l, path, raw := sound(t)
 		if err := os.WriteFile(path, bytes.TrimSuffix(raw, []byte("\n")), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		before := len(lines(raw))
-		log, err := l.Read()
-		if err == nil && len(log) != before {
-			t.Fatalf("Read gave %d of %d events and no error", len(log), before)
+		if log, err := l.Read(); err != nil || len(log) != before {
+			t.Fatalf("Read gave %d of %d events, %v", len(log), before, err)
 		}
-		// Appending now would glue two events onto one line.
-		if _, err := l.Update(func([]core.Event) ([]core.Event, error) { return []core.Event{call("late")}, nil }); err == nil {
-			if _, err := l.Read(); err == nil {
-				t.Log("append after a missing newline still reads back")
-			} else if !strings.Contains(err.Error(), "line") {
-				t.Errorf("unexpected error: %v", err)
-			}
+		if _, err := l.Update(func([]core.Event) ([]core.Event, error) { return []core.Event{call("late")}, nil }); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if log, err := l.Read(); err != nil || len(log) != before+1 {
+			t.Errorf("after the append, Read gave %d events, %v; want %d", len(log), err, before+1)
+		}
+	})
+}
+
+// TestFailedAppendIsTakenBack fills the disk halfway through an append.
+// The half that was written must be gone before the lock is released, or
+// the log would end in a cut-off line and stop every later decision.
+func TestFailedAppendIsTakenBack(t *testing.T) {
+	l, path, raw := sound(t)
+	l.write = func(f *os.File, b []byte) error {
+		f.Write(b[:len(b)/2])
+		return errors.New("no space left on device")
+	}
+	if _, err := l.Update(func([]core.Event) ([]core.Event, error) { return []core.Event{call("late")}, nil }); err == nil {
+		t.Fatal("Update reported success for an append that failed")
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, raw) {
+		t.Errorf("the failed append left %d bytes behind", len(after)-len(raw))
+	}
+	l.write = writeAndSync
+	if _, err := l.Update(func([]core.Event) ([]core.Event, error) { return []core.Event{call("late")}, nil }); err != nil {
+		t.Errorf("the next append failed: %v", err)
+	}
+}
+
+// TestRepairSetsAsideOnlyACutOffLastLine covers the one kind of damage a
+// crash can cause, and checks that Repair will not touch any other kind.
+func TestRepairSetsAsideOnlyACutOffLastLine(t *testing.T) {
+	t.Run("cut-off last line", func(t *testing.T) {
+		l, path, raw := sound(t)
+		before := len(lines(raw))
+		torn := []byte(`{"seq":99,"kind":"call","call":{"call":{"sess`)
+		if err := os.WriteFile(path, append(append([]byte(nil), raw...), torn...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.Read(); !errors.Is(err, ErrCutOff) {
+			t.Fatalf("Read: %v, want ErrCutOff", err)
+		}
+		if repaired, err := l.Repair(); err != nil || !repaired {
+			t.Fatalf("Repair = %v, %v", repaired, err)
+		}
+		if log, err := l.Read(); err != nil || len(log) != before {
+			t.Errorf("after the repair, Read gave %d events, %v; want the %d sound ones", len(log), err, before)
+		}
+		if aside, _ := os.ReadFile(path + cutOffSuffix); !bytes.Equal(aside, append(torn, '\n')) {
+			t.Errorf("the line set aside is %q, want %q", aside, torn)
+		}
+		if _, err := l.Update(func([]core.Event) ([]core.Event, error) { return []core.Event{call("late")}, nil }); err != nil {
+			t.Errorf("appending after the repair: %v", err)
+		}
+	})
+	t.Run("sound log", func(t *testing.T) {
+		l, path, raw := sound(t)
+		if repaired, err := l.Repair(); err != nil || repaired {
+			t.Errorf("Repair = %v, %v; want nothing to do", repaired, err)
+		}
+		if after, _ := os.ReadFile(path); !bytes.Equal(after, raw) {
+			t.Error("Repair changed a sound log")
+		}
+	})
+	t.Run("damage before the last line", func(t *testing.T) {
+		l, path, raw := sound(t)
+		// A line is missing from the middle and the last line is cut
+		// off as well. Setting the last line aside would leave a log
+		// that reads cleanly and is missing events.
+		ls := lines(raw)
+		bad := append(bytes.Join(ls[:2], nil), bytes.Join(ls[3:], nil)...)
+		bad = bad[:len(bad)-7]
+		if err := os.WriteFile(path, bad, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if repaired, err := l.Repair(); err == nil || repaired || errors.Is(err, ErrCutOff) {
+			t.Errorf("Repair = %v, %v; want it to refuse", repaired, err)
+		}
+		if after, _ := os.ReadFile(path); !bytes.Equal(after, bad) {
+			t.Error("Repair changed a log it should not have touched")
 		}
 	})
 }

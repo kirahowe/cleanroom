@@ -6,12 +6,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"cleanroom/internal/approval"
 	"cleanroom/internal/core"
+	"cleanroom/internal/eventlog"
 	"cleanroom/internal/upstream"
 )
 
@@ -226,6 +228,28 @@ func explainCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			return nil
 		}
 		return fmt.Errorf("the replayed decision differs from the recorded one (%s): the policy has changed since", recorded.Decision.Verdict)
+	}
+}
+
+// repairCommand deals with the one kind of log damage a crash can cause: a
+// last line that was cut off partway through. Until it is set aside, every
+// command and every decision fails with an error that names this command.
+func repairCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
+	return func(ctx context.Context) error {
+		st, err := c.open()
+		if err != nil {
+			return err
+		}
+		repaired, err := st.log.Repair()
+		if err != nil {
+			return fmt.Errorf("the log is damaged in a way repair will not touch, because events may be missing: %w", err)
+		}
+		if !repaired {
+			fmt.Fprintln(c.stdout, "Nothing to repair. The log reads cleanly.")
+			return nil
+		}
+		fmt.Fprintf(c.stdout, "Set aside the cut-off last line in %s.cut-off. The log reads cleanly again.\n", filepath.Join(st.dir, eventlog.FileName))
+		return nil
 	}
 }
 

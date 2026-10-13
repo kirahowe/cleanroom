@@ -113,7 +113,12 @@ func (g *Gateway) callTool(ctx context.Context, c core.Call) *mcp.CallToolResult
 	// The session took on the upstream's labels when the call was
 	// decided. Check that they still cover what the upstream may have
 	// returned: a contaminated session may have written to it since.
-	if events, logErr := g.Log.Read(); logErr != nil || !core.MayReturn(g.Policy, events, *rec.Call) {
+	events, logErr := g.Log.Read()
+	if logErr != nil {
+		g.logf("could not read the log after %s.%s ran: %v", c.Upstream, c.Tool, logErr)
+		return errorResult(fmt.Sprintf("%s.%s ran, but cleanroom could not read its log afterwards, so its result is withheld.", c.Upstream, c.Tool))
+	}
+	if !core.MayReturn(g.Policy, events, *rec.Call) {
 		return errorResult(fmt.Sprintf("%s.%s ran, but %s was written to while it did, so its result is withheld. Call it again.", c.Upstream, c.Tool, c.Upstream))
 	}
 	if g.Policy.Upstreams[c.Upstream].Tools[c.Tool].DiscardResult {

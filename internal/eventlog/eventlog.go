@@ -8,12 +8,22 @@
 // another. They coordinate through a file lock. Update holds the lock while
 // it reads the log, lets the caller decide, and appends, so "decide on the
 // current log and record the decision" is one atomic step across processes.
+//
+// A log that cannot be read stops every decision, because a shorter log
+// could be missing the event that contaminated a session. So the package
+// tries not to produce one. An append that fails partway is taken back
+// before the lock is released. A last line that is whole but has lost its
+// newline is still read, and the next append supplies the newline. What is
+// left is a last line cut off by a crash or a power cut in the middle of a
+// write: that is reported as ErrCutOff, and Repair sets it aside. Damage
+// anywhere else is never repaired here, because nothing can tell which
+// events are missing.
 package eventlog
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,11 +37,23 @@ import (
 // FileName is the log's name inside the state directory.
 const FileName = "events.jsonl"
 
+// cutOffSuffix is added to FileName for the file where Repair keeps the
+// lines it sets aside.
+const cutOffSuffix = ".cut-off"
+
+// ErrCutOff reports that the log's last line is incomplete: an append began
+// and did not finish. Every event before it is sound. Nothing was ever
+// decided on the strength of that line, since an append is only reported as
+// done once the whole line is on disk, so Repair may set it aside.
+var ErrCutOff = errors.New("the last line of the log is cut off, so an append did not finish; run `cleanroom repair` to set it aside")
+
 // Log is a handle on the log file. It holds no events in memory: the file
 // is the state. A Log is safe for concurrent use.
 type Log struct {
 	path string
 	now  func() time.Time
+	// write puts an append on disk. Tests replace it to make one fail.
+	write func(f *os.File, b []byte) error
 }
 
 // Open returns the log in dir, creating the directory if it does not exist.
@@ -41,7 +63,7 @@ func Open(dir string) (*Log, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &Log{path: filepath.Join(dir, FileName), now: time.Now}, nil
+	return &Log{path: filepath.Join(dir, FileName), now: time.Now, write: writeAndSync}, nil
 }
 
 // Read returns every event in the log.
@@ -62,17 +84,17 @@ func (l *Log) Read() ([]core.Event, error) {
 // fn should be quick and must not do I/O that depends on the outcome: decide,
 // build events, return. Effects happen after Update returns.
 func (l *Log) Update(fn func(log []core.Event) ([]core.Event, error)) ([]core.Event, error) {
-	f, err := os.OpenFile(l.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
+	f, err := l.openLocked()
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close() // also releases the lock
 
-	if err := lock(f); err != nil {
-		return nil, fmt.Errorf("locking %s: %w", l.path, err)
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
 	}
-
-	log, err := read(f)
+	log, err := parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", l.path, err)
 	}
@@ -82,6 +104,11 @@ func (l *Log) Update(fn func(log []core.Event) ([]core.Event, error)) ([]core.Ev
 	}
 
 	var buf bytes.Buffer
+	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+		// The last event is whole but its newline is missing. Supply
+		// it, or the new event would share its line.
+		buf.WriteByte('\n')
+	}
 	now := l.now().UTC()
 	for i := range added {
 		added[i].Seq = len(log) + 1 + i
@@ -98,13 +125,72 @@ func (l *Log) Update(fn func(log []core.Event) ([]core.Event, error)) ([]core.Ev
 	if err := core.CheckLog(append(log, added...)); err != nil {
 		return nil, fmt.Errorf("refusing to append: %w", err)
 	}
-	if _, err := f.Write(buf.Bytes()); err != nil {
-		return nil, err
-	}
-	if err := f.Sync(); err != nil {
+	if err := l.write(f, buf.Bytes()); err != nil {
+		// Part of the append may be in the file: a full disk writes
+		// what fits. Take it back while the lock is still held, so the
+		// failure costs this one call and not the whole log.
+		if undo := f.Truncate(int64(len(raw))); undo != nil {
+			return nil, fmt.Errorf("%w (and the partial append could not be removed: %v)", err, undo)
+		}
 		return nil, err
 	}
 	return added, nil
+}
+
+func writeAndSync(f *os.File, b []byte) error {
+	if _, err := f.Write(b); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// Repair sets aside a last line that was cut off, so that the log can be
+// read again. It reports whether there was one. The line is kept in a file
+// beside the log, not deleted.
+//
+// Repair touches nothing unless every event before the last line is sound.
+// Damage anywhere else is returned as the error it is.
+func (l *Log) Repair() (repaired bool, err error) {
+	f, err := l.openLocked()
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return false, err
+	}
+	if _, err := parse(raw); !errors.Is(err, ErrCutOff) {
+		return false, err // sound, or damaged in a way Repair must not hide
+	}
+	keep := bytes.LastIndexByte(raw, '\n') + 1
+	aside, err := os.OpenFile(l.path+cutOffSuffix, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return false, err
+	}
+	defer aside.Close()
+	if err := writeAndSync(aside, append(raw[keep:], '\n')); err != nil {
+		return false, err
+	}
+	if err := f.Truncate(int64(keep)); err != nil {
+		return false, err
+	}
+	return true, f.Sync()
+}
+
+// openLocked opens the log file and takes the exclusive lock on it. Closing
+// the file releases the lock.
+func (l *Log) openLocked() (*os.File, error) {
+	f, err := os.OpenFile(l.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := lock(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("locking %s: %w", l.path, err)
+	}
+	return f, nil
 }
 
 // lock takes an exclusive lock on f, waiting for it. A signal can interrupt
@@ -118,30 +204,31 @@ func lock(f *os.File) error {
 	}
 }
 
-// read parses the whole file. A log that does not parse or is not sound is
+// parse reads the whole file. A log that does not parse or is not sound is
 // an error, never a shorter log: dropping events could drop the one that
 // contaminated a session.
-func read(f *os.File) ([]core.Event, error) {
+func parse(raw []byte) ([]core.Event, error) {
 	var log []core.Event
 	// One event per line, and nothing else: a blank line or two events
-	// on a line is damage. ReadBytes has no limit on a line's length, so
-	// no event that was written can make the log unreadable.
-	r := bufio.NewReader(f)
-	for {
-		line, err := r.ReadBytes('\n')
-		if len(line) > 0 {
-			var e core.Event
-			if err := json.Unmarshal(line, &e); err != nil {
-				return nil, fmt.Errorf("line %d is not an event: %w", len(log)+1, err)
+	// on a line is damage. A line has no length limit, so no event that
+	// was written can make the log unreadable.
+	for len(raw) > 0 {
+		line, rest, terminated := bytes.Cut(raw, []byte("\n"))
+		var e core.Event
+		if err := json.Unmarshal(line, &e); err != nil {
+			if !terminated {
+				// Everything before this line must be sound for
+				// it to count as a cut-off append and nothing
+				// worse.
+				if err := core.CheckLog(log); err != nil {
+					return nil, err
+				}
+				return nil, ErrCutOff
 			}
-			log = append(log, e)
+			return nil, fmt.Errorf("line %d is not an event: %w", len(log)+1, err)
 		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
+		log = append(log, e)
+		raw = rest
 	}
 	if err := core.CheckLog(log); err != nil {
 		return nil, err
