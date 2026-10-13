@@ -1,11 +1,18 @@
 # cleanroom
 
-Cleanroom is an MCP gateway that lets an agent query untrusted content without
-reading it directly. A separate reader searches the source and returns an
-answer. Cleanroom checks typed answers, such as dates and amounts, before
-passing them to the agent. Uncontaminated sessions receive untrusted free text
-only if they explicitly accept contamination; otherwise it is stored for the
-user to review.
+Cleanroom is an MCP gateway that lets an agent ask questions about content it
+should not trust, such as an inbox, without reading that content itself. A
+separate reader searches the source and writes an answer. What the agent gets
+back depends on the kind of answer:
+
+- A typed answer, such as a date or an amount, is checked against its type and
+  then passed to the agent.
+- A free-text answer could carry an attacker's instructions, so cleanroom
+  stores it for the user to read and gives the agent only an id.
+
+An agent can ask to read the free text itself. Cleanroom then marks the
+session as contaminated, and from that point its actions need the user's
+approval.
 
 ## Why this exists
 
