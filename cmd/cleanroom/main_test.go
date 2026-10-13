@@ -90,6 +90,7 @@ func fakeReader() {
 		MCPServers map[string]struct {
 			Command string
 			Args    []string
+			Env     map[string]string
 		}
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
@@ -98,6 +99,9 @@ func fakeReader() {
 	server := config.MCPServers["calendar"]
 	cmd := exec.Command(server.Command, server.Args...)
 	cmd.Env = append(os.Environ(), "CLEANROOM_TEST_AS=cleanroom")
+	for name, value := range server.Env {
+		cmd.Env = append(cmd.Env, name+"="+value)
+	}
 	cmd.Stderr = os.Stderr
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "fake-reader", Version: "0"}, nil).
 		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)

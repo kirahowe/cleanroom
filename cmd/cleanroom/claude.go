@@ -45,13 +45,11 @@ func claudeCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			}
 			return err
 		}
-		stateDir := c.stateDir
-		if stateDir != "" {
-			if stateDir, err = filepath.Abs(stateDir); err != nil {
-				return err
-			}
+		policyFlag, stateDir, err := c.absoluteFlags()
+		if err != nil {
+			return err
 		}
-		self, err := os.Executable()
+		self, err := selfPath()
 		if err != nil {
 			return err
 		}
@@ -60,7 +58,7 @@ func claudeCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			id = newUUID()
 		}
 
-		cmd := exec.Command(*claude, claudeSessionArgs(self, id, *resume != "", policyPath, stateDir)...)
+		cmd := exec.Command(*claude, claudeSessionArgs(serveArgv(self, policyFlag, stateDir), id, *resume != "")...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = c.stdin, c.stdout, c.stderr
 		// Not tied to ctx: Ctrl-C belongs to the conversation, which
 		// uses it to interrupt a reply.
@@ -75,18 +73,18 @@ func claudeCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 
 // claudeSessionArgs is the Claude Code command line for a conversation
 // that has cleanroom and nothing else: no built-in tools, and no MCP
-// server but the one given here.
-func claudeSessionArgs(self, id string, resume bool, policyPath, stateDir string) []string {
-	serve := []string{"serve", "--session", id, "--policy", policyPath}
-	if stateDir != "" {
-		serve = append(serve, "--state", stateDir)
-	}
+// server but the one given here. The session id reaches the server through
+// its environment, which leaves serve's command line the same every time.
+func claudeSessionArgs(serve []string, id string, resume bool) []string {
 	type server struct {
-		Command string   `json:"command"`
-		Args    []string `json:"args"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
 	}
 	mcpConfig, _ := json.Marshal(map[string]any{
-		"mcpServers": map[string]server{"cleanroom": {Command: self, Args: serve}},
+		"mcpServers": map[string]server{"cleanroom": {
+			Command: serve[0], Args: serve[1:], Env: map[string]string{sessionEnv: id},
+		}},
 	})
 	conversation := []string{"--session-id", id}
 	if resume {
@@ -96,6 +94,55 @@ func claudeSessionArgs(self, id string, resume bool, policyPath, stateDir string
 		"--tools", "",
 		"--strict-mcp-config", "--mcp-config", string(mcpConfig),
 	)
+}
+
+// absoluteFlags returns --policy and --state as absolute paths, each empty
+// when the flag was not given.
+func (c *common) absoluteFlags() (policyFlag, stateDir string, err error) {
+	if c.policyPath != "" {
+		if policyFlag, err = filepath.Abs(c.policyPath); err != nil {
+			return "", "", err
+		}
+	}
+	if c.stateDir != "" {
+		if stateDir, err = filepath.Abs(c.stateDir); err != nil {
+			return "", "", err
+		}
+	}
+	return policyFlag, stateDir, nil
+}
+
+// claudeSettingsCommand prints what to add to Claude Code's settings so
+// that it may start cleanroom, for a user whose settings list the MCP
+// servers that are allowed.
+func claudeSettingsCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
+	return func(ctx context.Context) error {
+		policyFlag, stateDir, err := c.absoluteFlags()
+		if err != nil {
+			return err
+		}
+		self, err := selfPath()
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(c.stdout, claudeSettingsText([]string{self, "reader-tools"}, serveArgv(self, policyFlag, stateDir)))
+		return nil
+	}
+}
+
+// claudeSettingsText names each command exactly. An entry that allowed a
+// server by its name would allow any server given that name.
+func claudeSettingsText(readerTools, serve []string) string {
+	entry := func(argv []string) string {
+		b, _ := json.Marshal(argv)
+		return `    { "serverCommand": ` + string(b) + ` }`
+	}
+	return "Claude Code starts cleanroom as an MCP server in two places. If your Claude Code\n" +
+		"settings have an \"allowedMcpServers\" list, add these entries to it:\n\n" +
+		entry(readerTools) + ",\n" + entry(serve) + "\n\n" +
+		"The first is the reader behind \"cleanroom ask\". The second is \"cleanroom claude\",\n" +
+		"and depends on the --policy and --state you run it with. Each entry allows that\n" +
+		"exact command and no other. Settings without the list need no change.\n"
 }
 
 func resumeHint(id, policyFlag, stateFlag string) string {

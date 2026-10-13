@@ -82,8 +82,9 @@ func connect(ctx context.Context, path string) (*mcp.ClientSession, error) {
 	}
 	var config struct {
 		MCPServers map[string]struct {
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
@@ -91,6 +92,10 @@ func connect(ctx context.Context, path string) (*mcp.ClientSession, error) {
 	}
 	for _, server := range config.MCPServers {
 		cmd := exec.Command(server.Command, server.Args...)
+		cmd.Env = os.Environ()
+		for name, value := range server.Env {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
 		cmd.Stderr = os.Stderr
 		client := mcp.NewClient(&mcp.Implementation{Name: "scripted-reader", Version: "0"}, nil)
 		return client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)

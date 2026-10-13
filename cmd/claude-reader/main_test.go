@@ -49,7 +49,7 @@ func mcpConfig(t *testing.T, content string) string {
 	return path
 }
 
-const oneServer = `{"mcpServers":{"mail":{"command":"cleanroom","args":["reader-tools","/tmp/x.sock"]}}}`
+const oneServer = `{"mcpServers":{"mail":{"command":"/bin/cleanroom","args":["reader-tools"],"env":{"CLEANROOM_READER_SOCKET":"/tmp/x.sock"}}}}`
 
 func recorded(t *testing.T, dir, name string) string {
 	t.Helper()
@@ -87,7 +87,7 @@ func TestRun(t *testing.T) {
 
 	// The session is given the source's server under one fixed name, so
 	// a single entry in the user's settings allows it for every source.
-	if got := recorded(t, dir, "mcp-config"); got != `{"mcpServers":{"cleanroom":{"command":"cleanroom","args":["reader-tools","/tmp/x.sock"]}}}` {
+	if got := recorded(t, dir, "mcp-config"); got != `{"mcpServers":{"cleanroom":{"command":"/bin/cleanroom","args":["reader-tools"],"env":{"CLEANROOM_READER_SOCKET":"/tmp/x.sock"}}}}` {
 		t.Errorf("session MCP config = %s", got)
 	}
 
@@ -248,7 +248,7 @@ func TestRunWhenTheToolsAreBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now())
-	if err == nil || !strings.Contains(err.Error(), `{ "serverName": "cleanroom" }`) || !strings.Contains(err.Error(), "allowedMcpServers") {
+	if err == nil || !strings.Contains(err.Error(), `{ "serverCommand": ["/bin/cleanroom","reader-tools"] }`) || !strings.Contains(err.Error(), "allowedMcpServers") {
 		t.Errorf("got %s, %v", answer, err)
 	}
 }

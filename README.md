@@ -160,7 +160,7 @@ and prints `{"answer": ...}`. The policy specifies the command:
 
 `{mcp_config}` points to a JSON file in the `mcpServers` format. It connects
 the reader to one source through `cleanroom reader-tools` and a temporary Unix
-socket. The gateway authorizes each call and reuses its upstream connections.
+socket, whose path is in the server's `env` block. The gateway authorizes each call and reuses its upstream connections.
 The socket closes when the question finishes.
 
 The demo reader in `demo/reader` uses keywords and regular expressions and
@@ -178,8 +178,8 @@ user's own login and prints the session's answer:
 It starts the session with no built-in tools (`--tools ""`), only the MCP
 server cleanroom supplies (`--strict-mcp-config`), its own system prompt, an
 empty working directory and no saved transcript. Your Claude Code settings
-stay in force, so your hooks run in the session. If they restrict MCP
-servers, see "Allow the reader's tools" below. The answer is requested as
+stay in force, so your hooks run in the session. If they list the MCP
+servers that are allowed, see "Allow cleanroom in Claude Code" below. The answer is requested as
 structured output that matches the wanted type. `--model` selects the model
 and defaults to `opus`.
 
@@ -342,23 +342,34 @@ Without a terminal it prints what the ask tool returns, so a program or an
 agent that runs it gets a checked value, and for free text only an id.
 `cleanroom log` lists what the reader did, without content.
 
-### Allow the reader's tools
+### Allow cleanroom in Claude Code
 
-The reader's Claude Code session loads one MCP server, named `cleanroom`.
-Nothing needs changing unless your Claude Code settings set
-`allowedMcpServers`. If they do, add an entry for it in your `settings.json`
-(`~/.claude/settings.json`, or the directory `CLAUDE_CONFIG_DIR` names):
+Claude Code starts cleanroom as an MCP server in two places: the reader's
+session, and the conversation `cleanroom claude` opens. Nothing needs changing
+unless your Claude Code settings have an `allowedMcpServers` list. If they do,
+print the entries to add to it:
+
+```sh
+bin/cleanroom claude-settings
+```
 
 ```json
 "allowedMcpServers": [
-  { "serverName": "cleanroom" }
+  { "serverCommand": ["/path/to/bin/cleanroom", "reader-tools"] },
+  { "serverCommand": ["/path/to/bin/cleanroom", "serve"] }
 ]
 ```
 
-Until the entry is there, `ask` reports no answer and says why. A list that
-also has `serverCommand` entries is not supported: Claude Code then matches
-local servers by command and ignores names, and the reader's server command
-is different for every question.
+Each entry allows that exact command and arguments. Cleanroom keeps both
+command lines fixed for this purpose: the reader's socket and the
+conversation's session id travel in the server's environment, which Claude
+Code does not compare. An entry by `serverName` would be looser, since any
+server can be given a name.
+
+The entry pins the path and arguments, not the file's contents. Whoever can
+replace the binary at that path can run something else under the entry.
+
+Until the reader's entry is there, `ask` reports no answer and says why.
 
 ### From a coding session
 
@@ -392,8 +403,9 @@ conversation ends, the command prints how to resume it with
 `cleanroom claude --resume ID`. Resuming with `claude --resume` would restore
 Claude Code's own tools and leave cleanroom out.
 
-Claude Code runs with your settings and your environment. The same
-`cleanroom` entry in `allowedMcpServers` covers this conversation.
+Claude Code runs with your settings and your environment. The `serve` entry
+from `cleanroom claude-settings` covers this conversation; run that command
+with the same `--policy` and `--state` you give `claude`.
 
 ## Using it from a client
 

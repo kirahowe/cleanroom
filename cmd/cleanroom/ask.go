@@ -83,11 +83,11 @@ const readerFailedHelp = `
 The reader did not finish. Its own messages are in children.log, in the state
 directory beside the policy.
 
-If your Claude Code settings restrict MCP servers, the reader cannot load its
-tools until you allow them. Add this entry to "allowedMcpServers" in Claude
-Code's settings.json:
+If your Claude Code settings list the MCP servers that are allowed, the reader
+cannot load its tools until its command is on that list. This prints the
+entries to add:
 
-    { "serverName": "cleanroom" }
+    cleanroom claude-settings
 `
 
 // returnsSpec turns the --returns flag into the JSON the ask takes. A bare

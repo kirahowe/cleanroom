@@ -81,7 +81,7 @@ echo '{"answer": true}'
 	}
 	// The config names the pipe command and a socket, and nothing about
 	// the policy, the state or the ask.
-	config := regexp.MustCompile(`\{"mcpServers":\{"mail":\{"command":"/bin/cleanroom","args":\["reader-tools","(/[^"]+/tools\.sock)"\]\}\}\}`)
+	config := regexp.MustCompile(`\{"mcpServers":\{"mail":\{"command":"/bin/cleanroom","args":\["reader-tools"\],"env":\{"CLEANROOM_READER_SOCKET":"(/[^"]+/tools\.sock)"\}\}\}\}`)
 	m := config.FindStringSubmatch(stderr)
 	if m == nil {
 		t.Fatalf("mcp config:\n%s\nwant it to match %s", stderr, config)

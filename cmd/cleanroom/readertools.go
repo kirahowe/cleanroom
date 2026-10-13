@@ -6,6 +6,9 @@ import (
 	"flag"
 	"io"
 	"net"
+	"os"
+
+	"cleanroom/internal/reader"
 )
 
 // readerToolsCommand joins stdin and stdout to a unix socket. A command
@@ -14,14 +17,19 @@ import (
 // cleanroom server that asked the question, serving that one reader's
 // tools over the upstream connections it already holds.
 //
+// The socket's path arrives in the environment and not as an argument, so
+// that the command line is the same for every reader. A user who lets
+// Claude Code start only listed commands can then list this one.
+//
 // This command reads no policy and no log and starts nothing. Everything
 // that decides what a reader may do happens in the server.
 func readerToolsCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	return func(ctx context.Context) error {
-		if fs.NArg() != 1 {
-			return errors.New("give the path of the socket, as cleanroom does when it starts a reader")
+		socket := os.Getenv(reader.SocketEnv)
+		if fs.NArg() != 0 || socket == "" {
+			return errors.New("this command is started by cleanroom, which names the socket in " + reader.SocketEnv)
 		}
-		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", fs.Arg(0))
+		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
 		if err != nil {
 			return err
 		}

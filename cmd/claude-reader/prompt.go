@@ -86,8 +86,7 @@ func valueSchema(spec typed.Spec) schema {
 }
 
 // serverName is the name the source's MCP server has inside the session,
-// whatever the source is called. A user whose Claude Code settings restrict
-// MCP servers allows this one name, once, for every source.
+// whatever the source is called. The session's tools are named after it.
 const serverName = "cleanroom"
 
 // claudeArgs is the command line of a headless Claude Code session that can
@@ -102,8 +101,8 @@ const serverName = "cleanroom"
 //     reader read, off the disk.
 //
 // The user's Claude Code settings stay in force. Their hooks run in the
-// session, and if they restrict MCP servers, the session gets the source's
-// tools only once they allow serverName.
+// session, and if they list the MCP servers that are allowed, the session
+// gets the source's tools only once the reader's command is on that list.
 //
 // The question is not here. It goes to the session on stdin, so that a
 // question starting with a dash cannot be taken for an option.

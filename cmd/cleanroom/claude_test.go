@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // fakeClaude stands in for Claude Code and records its arguments.
@@ -51,6 +54,7 @@ func TestClaude(t *testing.T) {
 		MCPServers map[string]struct {
 			Command string
 			Args    []string
+			Env     map[string]string
 		}
 	}
 	if err := json.Unmarshal([]byte(args[6]), &mcp); err != nil {
@@ -58,8 +62,15 @@ func TestClaude(t *testing.T) {
 	}
 	server := mcp.MCPServers["cleanroom"]
 	if len(mcp.MCPServers) != 1 || !filepath.IsAbs(server.Command) ||
-		!slices.Equal(server.Args, []string{"serve", "--session", id, "--policy", policy}) {
+		!slices.Equal(server.Args, []string{"serve", "--policy", policy}) || server.Env["CLEANROOM_SESSION"] != id {
 		t.Errorf("mcp config = %+v", mcp)
+	}
+	// The id is in the environment and not in the command, so the command
+	// is the one "cleanroom claude-settings" prints, every time.
+	settings, _ := runCLI(t, false, "", "claude-settings", "--policy", policy)
+	command, _ := json.Marshal(append([]string{server.Command}, server.Args...))
+	if !strings.Contains(settings, `{ "serverCommand": `+string(command)+` }`) || strings.Contains(string(command), id) {
+		t.Errorf("claude-settings does not list %s:\n%s", command, settings)
 	}
 	// The conversation and the cleanroom session share the id, and the
 	// way back in keeps both.
@@ -72,7 +83,7 @@ func TestClaude(t *testing.T) {
 		t.Fatal(out)
 	}
 	args = strings.Split(strings.TrimSpace(readFile(t, argsFile)), "\n")
-	if !slices.Equal(args[:4], []string{"--resume", id, "--tools", ""}) || !strings.Contains(args[6], `"--session","`+id+`"`) {
+	if !slices.Equal(args[:4], []string{"--resume", id, "--tools", ""}) || !strings.Contains(args[6], `"CLEANROOM_SESSION":"`+id+`"`) {
 		t.Errorf("resume args = %q", args)
 	}
 }
@@ -108,5 +119,55 @@ func TestNewUUID(t *testing.T) {
 	a, b := newUUID(), newUUID()
 	if !uuidPattern.MatchString(a) || a[14] != '4' || a == b {
 		t.Errorf("%s, %s", a, b)
+	}
+}
+
+func TestClaudeSettings(t *testing.T) {
+	out, ok := runCLI(t, false, "", "claude-settings")
+	if !ok {
+		t.Fatal(out)
+	}
+	self, err := selfPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(self)
+	for _, want := range []string{
+		`{ "serverCommand": [` + string(quoted) + `,"reader-tools"] }`,
+		`{ "serverCommand": [` + string(quoted) + `,"serve"] }`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %s:\n%s", want, out)
+		}
+	}
+	// Allowing by name would allow any server given that name.
+	if strings.Contains(out, "serverName") {
+		t.Errorf("output allows a server by name:\n%s", out)
+	}
+}
+
+// serve takes its session from the environment when the launcher put it
+// there, and a resumed conversation therefore finds its history.
+func TestServeTakesItsSessionFromTheEnvironment(t *testing.T) {
+	ctx := context.Background()
+	policy := testPolicy(t)
+	for range 2 {
+		cmd := cleanroom(t, "serve", "--policy", policy)
+		cmd.Env = append(cmd.Env, "CLEANROOM_SESSION=11111111-2222-4333-8444-555555555555")
+		cs, err := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "0"}, nil).
+			Connect(ctx, &mcpsdk.CommandTransport{Command: cmd}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "ask", Arguments: map[string]any{
+			"source": "calendar", "question": "How many tools can you see?", "returns": "number",
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		cs.Close()
+	}
+	log, _ := runCLI(t, false, "", "log", "--policy", policy)
+	if strings.Count(log, "11111111-2222-4333-8444-555555555555") != 2 {
+		t.Errorf("both asks should belong to the one session:\n%s", log)
 	}
 }

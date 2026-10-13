@@ -56,11 +56,19 @@ type Command struct {
 	Dir  string
 	// Pipe is the command that joins its stdin and stdout to a unix
 	// socket: the cleanroom binary and "reader-tools". The socket's path
-	// is appended for each job.
+	// is given to it in SocketEnv, for each job.
+	//
+	// The path is kept out of the arguments so that the command is the
+	// same for every job. An MCP client that only starts servers on an
+	// allowlist of exact commands can then list this one.
 	Pipe []string
 	// Logf receives what the command writes to stderr.
 	Logf func(format string, args ...any)
 }
+
+// SocketEnv names the environment variable that tells the Pipe command
+// which socket to join.
+const SocketEnv = "CLEANROOM_READER_SOCKET"
 
 // Answer runs the command and returns the answer it printed.
 func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
@@ -130,12 +138,14 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 // "mcpServers" layout that MCP clients share.
 func (c *Command) mcpConfig(job Job, socket string) []byte {
 	type server struct {
-		Command string   `json:"command"`
-		Args    []string `json:"args"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
 	}
-	args := append(slices.Clone(c.Pipe[1:]), socket)
 	b, _ := json.MarshalIndent(map[string]any{
-		"mcpServers": map[string]server{job.Source: {Command: c.Pipe[0], Args: args}},
+		"mcpServers": map[string]server{job.Source: {
+			Command: c.Pipe[0], Args: c.Pipe[1:], Env: map[string]string{SocketEnv: socket},
+		}},
 	}, "", "  ")
 	return b
 }

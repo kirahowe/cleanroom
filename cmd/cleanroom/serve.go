@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -17,10 +18,33 @@ import (
 	"cleanroom/internal/upstream"
 )
 
+// sessionEnv names the environment variable that gives serve its session
+// id when --session is absent. "cleanroom claude" uses it to keep the id
+// out of the server's command line, so that the command is the same for
+// every conversation and a user can allow exactly that command in Claude
+// Code's settings.
+const sessionEnv = "CLEANROOM_SESSION"
+
+// serveArgv is the command line of the MCP server as an MCP client is told
+// to start it. policyFlag and stateDir are empty for the defaults.
+func serveArgv(self, policyFlag, stateDir string) []string {
+	argv := []string{self, "serve"}
+	if policyFlag != "" {
+		argv = append(argv, "--policy", policyFlag)
+	}
+	if stateDir != "" {
+		argv = append(argv, "--state", stateDir)
+	}
+	return argv
+}
+
 func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	session := fs.String("session", "",
 		"id of the conversation this server belongs to; reuse it when the conversation is resumed")
 	return func(ctx context.Context) error {
+		if *session == "" {
+			*session = os.Getenv(sessionEnv)
+		}
 		if *session == "" {
 			*session = newSessionID()
 			fmt.Fprintf(c.stderr, "cleanroom: no --session given, using %s. "+
@@ -69,7 +93,7 @@ func (c *common) gateway(session string) (*gateway.Gateway, func(), error) {
 // policy. Each reader reaches its source through this same binary, run as
 // "cleanroom reader-tools", which is a pipe back to this process.
 func commandReaders(cfg *config.Config, logf func(string, ...any)) (map[string]reader.Reader, error) {
-	self, err := os.Executable()
+	self, err := selfPath()
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +110,17 @@ func commandReaders(cfg *config.Config, logf func(string, ...any)) (map[string]r
 		}
 	}
 	return readers, nil
+}
+
+// selfPath is the path of this program with symlinks resolved. Commands
+// that others start are written with it, so that they read the same
+// whether cleanroom was run by its own path or through a link.
+func selfPath() (string, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(self)
 }
 
 func newSessionID() string {

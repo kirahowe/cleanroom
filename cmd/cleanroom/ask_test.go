@@ -80,12 +80,12 @@ func TestAskExplainsAFailedReader(t *testing.T) {
 		},
 	}`, os.Args[0]))
 	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
-	if !ok || !strings.Contains(out, "No answer") || !strings.Contains(out, `{ "serverName": "cleanroom" }`) || !strings.Contains(out, "children.log") {
+	if !ok || !strings.Contains(out, "No answer") || !strings.Contains(out, "cleanroom claude-settings") || !strings.Contains(out, "children.log") {
 		t.Errorf("got %v:\n%s", ok, out)
 	}
 	// An agent is told only that there is no answer.
 	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
-	if strings.Contains(out, "serverName") || !strings.Contains(out, `"status": "no_answer"`) {
+	if strings.Contains(out, "claude-settings") || !strings.Contains(out, `"status": "no_answer"`) {
 		t.Errorf("without a terminal:\n%s", out)
 	}
 }

@@ -7,7 +7,7 @@
 //	cleanroom ask QUESTION           ask a source a question and print the answer
 //	cleanroom claude                 start a Claude Code conversation with only cleanroom's tools
 //	cleanroom serve [flags]          run the MCP server on stdin and stdout
-//	cleanroom reader-tools SOCKET    connect a reader to its tools (started by cleanroom)
+//	cleanroom reader-tools           connect a reader to its tools (started by cleanroom)
 //
 // For the person:
 //
@@ -22,8 +22,9 @@
 //
 // Every command takes --policy and --state. Without --policy the policy is
 // read from ~/.config/cleanroom/policy.jsonc, and without --state the state
-// directory is .cleanroom next to the policy. Nothing is read from the
-// environment.
+// directory is .cleanroom next to the policy. No setting is read from the
+// environment. Two variables carry values from cleanroom to a process it
+// has had started: the reader's socket and a conversation's session id.
 package main
 
 import (
@@ -74,8 +75,9 @@ var commands = []command{
 	{"init", "set up a policy for one IMAP mailbox (terminal only)", initCommand},
 	{"ask", "ask a source a question: ask [--returns TYPE] QUESTION", askCommand},
 	{"claude", "start a Claude Code conversation whose only tools are cleanroom's (terminal only)", claudeCommand},
+	{"claude-settings", "print the entries that let Claude Code start cleanroom", claudeSettingsCommand},
 	{"serve", "run the MCP server on stdin and stdout", serveCommand},
-	{"reader-tools", "connect a reader to its tools: reader-tools SOCKET (started by cleanroom)", readerToolsCommand},
+	{"reader-tools", "connect a reader to its tools (started by cleanroom)", readerToolsCommand},
 	{"proposals", "list held calls and where they stand", proposalsCommand},
 	{"answers", "list free-text answers delivered to you", answersCommand},
 	{"show", "read a held call or an answer: show N (terminal only)", showCommand},
@@ -180,7 +182,7 @@ func usageText() string {
 	var b strings.Builder
 	b.WriteString("usage: cleanroom <command> [flags]\n\n")
 	for _, cmd := range commands {
-		fmt.Fprintf(&b, "  %-13s %s\n", cmd.name, cmd.summary)
+		fmt.Fprintf(&b, "  %-15s %s\n", cmd.name, cmd.summary)
 	}
 	b.WriteString("\nRun cleanroom <command> -h for a command's flags.\n")
 	return b.String()

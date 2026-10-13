@@ -6,8 +6,8 @@
 // The session uses the Claude Code login of the user who runs it. What the
 // reader reads from the source is sent to Anthropic.
 //
-// The user's Claude Code settings apply to the session. If they restrict
-// MCP servers, the user has to allow the one named "cleanroom".
+// The user's Claude Code settings apply to the session. If they list the
+// MCP servers that are allowed, the user has to add the reader's command.
 //
 // Like any reader it is untrusted. The flags in claudeArgs take away the
 // session's other tools, but the process is not sandboxed. See "Limits" in
@@ -105,7 +105,7 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
 	if strings.Contains(stderr.String(), "MCP server blocked") {
-		return nil, "", errors.New(blockedHelp)
+		return nil, "", errors.New(blockedHelp(server))
 	}
 
 	result, parseErr := parseResult(stdout.Bytes())
@@ -123,12 +123,20 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	return line, report, err
 }
 
-// blockedHelp is what to do when Claude Code's settings keep the session
-// from loading the source's tools.
-const blockedHelp = `Claude Code did not load the reader's tools, because its settings restrict MCP servers.
-To allow them, add this entry to "allowedMcpServers" in Claude Code's settings.json:
-
-    { "serverName": "` + serverName + `" }`
+// blockedHelp says what to do when Claude Code's settings keep the session
+// from loading the source's tools. It names the server's exact command,
+// which is the same for every question.
+func blockedHelp(server json.RawMessage) string {
+	var s struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+	}
+	json.Unmarshal(server, &s) // a server cleanroom wrote; an empty entry is still a usable hint
+	argv, _ := json.Marshal(append([]string{s.Command}, s.Args...))
+	return "Claude Code did not load the reader's tools, because its settings list the MCP servers that are allowed.\n" +
+		"To allow them, add this entry to \"allowedMcpServers\" in Claude Code's settings.json:\n\n" +
+		`    { "serverCommand": ` + string(argv) + " }"
+}
 
 // sourceServer returns the one server in the config file cleanroom wrote:
 // the source's name, and how to start its server.
