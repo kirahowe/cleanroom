@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"pgregory.net/rapid"
@@ -228,36 +227,26 @@ func TestAskFailures(t *testing.T) {
 	}
 }
 
-func TestReaderServerOffersOnlyReadTools(t *testing.T) {
+// TestReaderIsOfferedOnlyReadTools looks at the tools as a reader is
+// handed them. They go through the gateway's own upstream connections, and
+// they stop working once the ask is answered.
+func TestReaderIsOfferedOnlyReadTools(t *testing.T) {
 	w := newWorld(t)
-	// Start an ask whose reader connects over MCP, as a command reader
-	// would, and reports what it found there.
 	var offered []string
-	var afterAnswer string
+	var tools reader.Tools
 	w.useReader(func(ctx context.Context, job reader.Job) ([]byte, error) {
-		server, err := w.g.ReaderServer(ctx, job.Ask)
+		list, err := job.Tools.List(ctx)
 		if err != nil {
 			return nil, err
 		}
-		cs := connect(t, server)
-		tools, err := cs.ListTools(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		for _, tool := range tools.Tools {
+		for _, tool := range list {
 			offered = append(offered, tool.Name)
 		}
-		call(t, cs, "search", map[string]any{"query": "x"}, nil)
-		t.Cleanup(func() {
-			// The connection outlives the ask. It must be useless.
-			afterAnswer = text(call(t, cs, "search", nil, nil))
-		})
-		return []byte(`true`), nil
-	})
-	t.Cleanup(func() {
-		if !strings.HasPrefix(afterAnswer, "REFUSED") {
-			t.Errorf("a reader call after the answer returned %q, want a refusal", afterAnswer)
+		if _, err := job.Tools.Call(ctx, "search", json.RawMessage(`{"query":"x"}`)); err != nil {
+			return nil, err
 		}
+		tools = job.Tools // kept past the answer, as a reader left running would
+		return []byte(`true`), nil
 	})
 
 	res, _ := ask(t, w, "chief", map[string]any{"source": "inbox", "question": "q", "returns": "boolean"})
@@ -267,14 +256,13 @@ func TestReaderServerOffersOnlyReadTools(t *testing.T) {
 	if diff := cmp.Diff([]string{"read", "search"}, offered); diff != "" {
 		t.Errorf("reader tools (-want +got):\n%s", diff)
 	}
-	if _, err := w.g.ReaderServer(context.Background(), 9999); err == nil {
-		t.Error("a reader server was built for an ask that does not exist")
+	seen := len(w.fakes["inbox"].Seen())
+	after, err := tools.Call(context.Background(), "search", nil)
+	if err != nil || !strings.HasPrefix(text(after), "REFUSED") {
+		t.Errorf("a reader call after the answer returned %q, %v; want a refusal", text(after), err)
 	}
-	// An ask that was never answered is closed by age.
-	// A negative timeout puts every ask past its deadline.
-	expired := &Gateway{Policy: w.g.Policy, Log: w.g.Log, Upstreams: w.g.Upstreams, ReaderTimeout: -time.Hour}
-	if _, err := expired.ReaderServer(context.Background(), res.ID); err == nil {
-		t.Error("a reader server was built for an ask past its deadline")
+	if got := len(w.fakes["inbox"].Seen()); got != seen {
+		t.Errorf("a reader call after the answer reached the upstream")
 	}
 }
 

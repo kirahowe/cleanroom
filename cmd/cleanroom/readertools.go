@@ -4,39 +4,35 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"log"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"cleanroom/internal/gateway"
-	"cleanroom/internal/upstream"
+	"io"
+	"net"
 )
 
-// readerToolsCommand serves the tools of one reader over stdio. Cleanroom
-// starts it indirectly: a command reader is given an MCP config file that
-// names this command, and connects to it as any MCP client would.
+// readerToolsCommand joins stdin and stdout to a unix socket. A command
+// reader is given an MCP config file that names this command, and connects
+// to it as any MCP client would. At the other end of the socket is the
+// cleanroom server that asked the question, serving that one reader's
+// tools over the upstream connections it already holds.
+//
+// This command reads no policy and no log and starts nothing. Everything
+// that decides what a reader may do happens in the server.
 func readerToolsCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
-	ask := fs.Int("ask", 0, "number of the ask this reader is answering")
 	return func(ctx context.Context) error {
-		if *ask == 0 {
-			return errors.New("--ask is required")
+		if fs.NArg() != 1 {
+			return errors.New("give the path of the socket, as cleanroom does when it starts a reader")
 		}
-		st, err := c.open()
+		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", fs.Arg(0))
 		if err != nil {
 			return err
 		}
-		children, err := st.childLog()
-		if err != nil {
-			return err
-		}
-		defer children.Close()
-		upstreams := upstream.New(st.cfg.Policy, upstream.CommandDialer(st.cfg.Dir, children))
-		defer upstreams.Close()
-		g := &gateway.Gateway{Policy: st.cfg.Policy, Log: st.log, Upstreams: upstreams, Logf: log.Printf}
-		server, err := g.ReaderServer(ctx, *ask)
-		if err != nil {
-			return err
-		}
-		return server.Run(ctx, &mcp.StdioTransport{})
+		defer conn.Close()
+		go func() {
+			io.Copy(conn, c.stdin)
+			// The reader has finished talking. Tell the server, which
+			// then closes its side and ends the copy below.
+			conn.(*net.UnixConn).CloseWrite()
+		}()
+		_, err = io.Copy(c.stdout, conn)
+		return err
 	}
 }

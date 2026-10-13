@@ -36,6 +36,16 @@ func TestMain(m *testing.M) {
 
 // fakeUpstream is a calendar-like MCP server with one tool that acts.
 func fakeUpstream() {
+	// Leave a line for each time this server is started, so a test can
+	// count how many times cleanroom started it.
+	if path := os.Getenv("FAKE_UPSTREAM_STARTS"); path != "" {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			os.Exit(1)
+		}
+		fmt.Fprintln(f, "started")
+		f.Close()
+	}
 	s := mcp.NewServer(&mcp.Implementation{Name: "fake-calendar", Version: "0"}, nil)
 	s.AddTool(&mcp.Tool{
 		Name:        "create_event",
@@ -185,10 +195,15 @@ func TestServeOverStdio(t *testing.T) {
 }
 
 // TestAskThroughRealProcesses runs the whole chain as processes: client,
-// server, a reader started as a command, the reader's own tool server, and
-// the upstream behind it.
+// server, a reader started as a command, the pipe that joins the reader to
+// the server, and the upstream behind it.
+//
+// The server starts the upstream once and every reader uses that one
+// connection. A server that has to log in must not do it per question.
 func TestAskThroughRealProcesses(t *testing.T) {
 	ctx := context.Background()
+	starts := filepath.Join(t.TempDir(), "starts")
+	t.Setenv("FAKE_UPSTREAM_STARTS", starts)
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
 	cs, err := client.Connect(ctx, &mcp.CommandTransport{
 		Command: cleanroom(t, "serve", "--policy", testPolicy(t), "--session", "chief"),
@@ -198,16 +213,22 @@ func TestAskThroughRealProcesses(t *testing.T) {
 	}
 	defer cs.Close()
 
-	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: map[string]any{
-		"source": "calendar", "question": "How many tools can you see?", "returns": "number",
-	}})
-	if err != nil {
-		t.Fatal(err)
+	for range 3 {
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: map[string]any{
+			"source": "calendar", "question": "How many tools can you see?", "returns": "number",
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// One: list_events. The reader was not offered create_event
+		// and could not call it.
+		if got := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, `"value": 1`) {
+			t.Errorf("ask = %s, want the value 1", got)
+		}
 	}
-	// One: list_events. The reader was not offered create_event and
-	// could not call it.
-	if got := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(got, `"value": 1`) {
-		t.Errorf("ask = %s, want the value 1", got)
+	cs.Close()
+	if got, _ := os.ReadFile(starts); string(got) != "started\n" {
+		t.Errorf("after three questions the upstream had been started %d times, want once", strings.Count(string(got), "started"))
 	}
 }
 

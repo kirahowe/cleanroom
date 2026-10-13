@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -20,7 +21,10 @@ import (
 // Dialer connects to one upstream server.
 type Dialer func(ctx context.Context, name string, up core.Upstream) (*mcp.ClientSession, error)
 
-// Set is the upstream servers of a policy, connected on first use.
+// Set is the upstream servers of a policy. Each is connected on first use
+// and stays connected until Close, so a server that has to log in does so
+// once for the life of the process that holds the Set, however many calls
+// and questions pass through it.
 //
 // The connections and tool lists are the only mutable state here, and
 // they carry no decisions: what a session may do is never cached.
@@ -41,6 +45,9 @@ type server struct {
 	// kept for good, so a server cannot change a tool's annotations
 	// partway through a session to get a different class.
 	connect func() (*connection, error)
+	// dialed is set once connect has been asked to dial, so that Close
+	// can tell an upstream that was never used from one that was.
+	dialed atomic.Bool
 }
 
 type connection struct {
@@ -57,6 +64,7 @@ func New(p core.Policy, dial Dialer) *Set {
 		// The connection outlives whichever call happened to make it,
 		// so it is not tied to that call's context.
 		srv.connect = sync.OnceValues(func() (*connection, error) {
+			srv.dialed.Store(true)
 			return s.open(context.Background(), srv)
 		})
 		s.servers[name] = srv
@@ -131,9 +139,14 @@ func (s *Set) Call(ctx context.Context, name, tool string, args json.RawMessage)
 }
 
 // Close disconnects from every upstream that was connected and stops the
-// ones it started. The Set must not be used afterwards.
+// ones it started. An upstream that was never used is left alone: closing
+// must not be what starts it. The Set must not be used afterwards.
 func (s *Set) Close() {
 	for _, srv := range s.servers {
+		if !srv.dialed.Load() {
+			continue
+		}
+		// connect waits for a dial that is still in progress.
 		if c, err := srv.connect(); err == nil {
 			c.session.Close()
 		}

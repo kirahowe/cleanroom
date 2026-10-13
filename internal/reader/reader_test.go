@@ -5,11 +5,16 @@ package reader
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestParseOutput(t *testing.T) {
@@ -57,7 +62,7 @@ echo "source=$1 question=$2 returns=$3" >&2
 tr -d ' \n' < "$4" >&2; echo >&2
 echo '{"answer": true}'
 `), "{source}", "{question}", "{returns}", "{mcp_config}"},
-		ToolServer: []string{"/bin/cleanroom", "reader-tools", "--policy", "p.jsonc"},
+		Pipe: []string{"/bin/cleanroom", "reader-tools"},
 	}
 	var logged []string
 	c.Logf = func(format string, args ...any) { logged = append(logged, args[0].(string)) }
@@ -73,9 +78,95 @@ echo '{"answer": true}'
 	if !strings.Contains(stderr, `source=mail question=Is it $HOME; rm -rf? returns="boolean"`) {
 		t.Errorf("arguments were not substituted as expected:\n%s", stderr)
 	}
-	wantConfig := `{"mcpServers":{"mail":{"command":"/bin/cleanroom","args":["reader-tools","--policy","p.jsonc","--ask","7"]}}}`
-	if !strings.Contains(stderr, wantConfig) {
-		t.Errorf("mcp config:\n%s\nwant %s", stderr, wantConfig)
+	// The config names the pipe command and a socket, and nothing about
+	// the policy, the state or the ask.
+	config := regexp.MustCompile(`\{"mcpServers":\{"mail":\{"command":"/bin/cleanroom","args":\["reader-tools","(/[^"]+/tools\.sock)"\]\}\}\}`)
+	m := config.FindStringSubmatch(stderr)
+	if m == nil {
+		t.Fatalf("mcp config:\n%s\nwant it to match %s", stderr, config)
+	}
+	if _, err := os.Stat(m[1]); err == nil {
+		t.Errorf("the socket %s is still there after the reader finished", m[1])
+	}
+}
+
+// fakeTools is the tools of a source, as the gateway would hand them to a
+// reader. It records the calls that reach it.
+type fakeTools struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (f *fakeTools) List(context.Context) ([]*mcp.Tool, error) {
+	return []*mcp.Tool{{Name: "search", Description: "Search.", InputSchema: json.RawMessage(`{"type":"object"}`)}}, nil
+}
+
+func (f *fakeTools) Call(_ context.Context, tool string, args json.RawMessage) (*mcp.CallToolResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, tool+" "+string(args))
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "found"}}}, nil
+}
+
+// TestToolsAreServedOnTheSocket connects the way a command reader does, as
+// an MCP client on the socket, and checks that the calls arrive at the
+// job's Tools. Nothing else is started to serve them.
+func TestToolsAreServedOnTheSocket(t *testing.T) {
+	ctx := context.Background()
+	tools := &fakeTools{}
+	server, err := toolServer(ctx, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Not t.TempDir: its path can be too long for a socket.
+	dir, err := os.MkdirTemp("", "cleanroom-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "tools.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serving, stop := context.WithCancel(ctx)
+	defer stop()
+	go serve(serving, listener, server)
+
+	// Two readers' worth of connections, one after the other and both
+	// served by the same process.
+	for i := range 2 {
+		conn, err := net.Dial("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cs, err := mcp.NewClient(&mcp.Implementation{Name: "reader", Version: "0"}, nil).
+			Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed, err := cs.ListTools(ctx, nil)
+		if err != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != "search" {
+			t.Fatalf("connection %d: tools = %+v, %v", i, listed, err)
+		}
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "search", Arguments: map[string]any{"query": "x"}})
+		if err != nil || res.IsError {
+			t.Fatalf("connection %d: search = %+v, %v", i, res, err)
+		}
+		if i == 0 {
+			cs.Close()
+			continue
+		}
+		// The job ends with this connection still open. It must stop
+		// working.
+		stop()
+		listener.Close()
+		if _, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "search"}); err == nil {
+			t.Error("a call on a connection left open after the job ended still worked")
+		}
+	}
+	if got := len(tools.calls); got != 2 {
+		t.Errorf("%d calls reached the tools, want 2: %v", got, tools.calls)
 	}
 }
 
@@ -88,7 +179,7 @@ func TestCommandFailures(t *testing.T) {
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
-			c := &Command{Argv: []string{script(t, body)}, ToolServer: []string{"x"}}
+			c := &Command{Argv: []string{script(t, body)}, Pipe: []string{"x"}}
 			if raw, err := c.Answer(context.Background(), Job{Ask: 1, Source: "mail"}); err == nil {
 				t.Errorf("Answer = %q, want an error", raw)
 			}
@@ -97,7 +188,7 @@ func TestCommandFailures(t *testing.T) {
 }
 
 func TestCommandIsStoppedWhenTimeRunsOut(t *testing.T) {
-	c := &Command{Argv: []string{script(t, `sleep 30`)}, ToolServer: []string{"x"}}
+	c := &Command{Argv: []string{script(t, `sleep 30`)}, Pipe: []string{"x"}}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()

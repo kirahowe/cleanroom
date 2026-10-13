@@ -8,15 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"cleanroom/internal/typed"
+	"cleanroom/internal/version"
 )
 
 // Command is a Reader that runs an external program: a script, or a
@@ -26,6 +29,13 @@ import (
 // through an MCP server that cleanroom describes in a config file. It
 // prints its answer to stdout as JSON: {"answer": <value>}, or
 // {"answer": null} when it has none.
+//
+// That MCP server is this process. For the length of one job it listens on
+// a unix socket in a private directory and serves the job's Tools there.
+// The config file names a command that only joins the reader to the socket,
+// so the reader's calls travel over connections this process already holds
+// and nothing is started or logged in to per question. When the job ends
+// the socket is gone, and with it the reader's access.
 type Command struct {
 	// Argv is the command, with placeholders that are replaced for each
 	// job:
@@ -44,10 +54,10 @@ type Command struct {
 	Argv []string
 	// Dir is the working directory for the command.
 	Dir string
-	// ToolServer is the command that serves a reader's tools over
-	// stdio: the cleanroom binary and its reader-tools arguments. The
-	// ask number is appended for each job.
-	ToolServer []string
+	// Pipe is the command that joins its stdin and stdout to a unix
+	// socket: the cleanroom binary and "reader-tools". The socket's path
+	// is appended for each job.
+	Pipe []string
 	// Logf receives what the command writes to stderr.
 	Logf func(format string, args ...any)
 }
@@ -60,8 +70,24 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	}
 	defer os.RemoveAll(tmp)
 
+	server, err := toolServer(ctx, job.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("listing the tools of %q: %w", job.Source, err)
+	}
+	// MkdirTemp made the directory for this user only, so only this user
+	// can connect.
+	socket := filepath.Join(tmp, "tools.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, err
+	}
+	serving, stop := context.WithCancel(context.Background())
+	defer stop() // ends every connection a reader left open
+	defer listener.Close()
+	go serve(serving, listener, server)
+
 	configPath := filepath.Join(tmp, "mcp.json")
-	if err := os.WriteFile(configPath, c.mcpConfig(job), 0o600); err != nil {
+	if err := os.WriteFile(configPath, c.mcpConfig(job, socket), 0o600); err != nil {
 		return nil, err
 	}
 
@@ -102,16 +128,57 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 
 // mcpConfig is the file a command reader is pointed at. It uses the
 // "mcpServers" layout that MCP clients share.
-func (c *Command) mcpConfig(job Job) []byte {
+func (c *Command) mcpConfig(job Job, socket string) []byte {
 	type server struct {
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
 	}
-	args := append(append([]string(nil), c.ToolServer[1:]...), "--ask", strconv.Itoa(job.Ask))
+	args := append(append([]string(nil), c.Pipe[1:]...), socket)
 	b, _ := json.MarshalIndent(map[string]any{
-		"mcpServers": map[string]server{job.Source: {Command: c.ToolServer[0], Args: args}},
+		"mcpServers": map[string]server{job.Source: {Command: c.Pipe[0], Args: args}},
 	}, "", "  ")
 	return b
+}
+
+// toolServer builds the MCP server that a command reader connects to. It
+// offers the reader's tools under their own names and passes every call to
+// tools.Call, which is where the call is decided.
+func toolServer(ctx context.Context, tools Tools) (*mcp.Server, error) {
+	s := mcp.NewServer(&mcp.Implementation{Name: "cleanroom-reader-tools", Version: version.Version}, nil)
+	if tools == nil {
+		return s, nil
+	}
+	list, err := tools.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, tool := range list {
+		s.AddTool(&mcp.Tool{
+			Name:        tool.Name,
+			Title:       tool.Title,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+			Annotations: tool.Annotations,
+		}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return tools.Call(ctx, tool.Name, req.Params.Arguments)
+		})
+	}
+	return s, nil
+}
+
+// serve answers each connection on l with s, until l is closed. Cancelling
+// ctx ends the connections that are open.
+func serve(ctx context.Context, l net.Listener, s *mcp.Server) {
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer conn.Close()
+			s.Run(ctx, &mcp.IOTransport{Reader: conn, Writer: conn})
+		}()
+	}
 }
 
 // capped keeps the first bytes written to it and drops the rest, so a

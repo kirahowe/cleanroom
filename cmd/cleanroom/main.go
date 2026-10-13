@@ -4,7 +4,7 @@
 // Usage:
 //
 //	cleanroom serve [flags]          run the MCP server on stdin and stdout
-//	cleanroom reader-tools --ask N   serve one reader's tools (started by cleanroom)
+//	cleanroom reader-tools SOCKET    connect a reader to its tools (started by cleanroom)
 //
 // For the person:
 //
@@ -57,7 +57,7 @@ type command struct {
 
 var commands = []command{
 	{"serve", "run the MCP server on stdin and stdout", serveCommand},
-	{"reader-tools", "serve one reader's tools on stdin and stdout (started by cleanroom)", readerToolsCommand},
+	{"reader-tools", "connect a reader to its tools: reader-tools SOCKET (started by cleanroom)", readerToolsCommand},
 	{"proposals", "list held calls and where they stand", proposalsCommand},
 	{"answers", "list free-text answers delivered to you", answersCommand},
 	{"show", "read a held call or an answer: show N (terminal only)", showCommand},
@@ -86,9 +86,7 @@ type common struct {
 // state is a loaded policy and the open log that goes with it.
 type state struct {
 	cfg *config.Config
-	// dir is the absolute path of the state directory. It is absolute
-	// because readers are started in another directory and are handed
-	// this path.
+	// dir is the absolute path of the state directory.
 	dir string
 	log *eventlog.Log
 }

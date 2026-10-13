@@ -58,8 +58,8 @@ func TestPlaceholdersAreSubstitutedOnce(t *testing.T) {
 				os.Remove(filepath.Join(dir, "arg"+strconv.Itoa(i)))
 			}
 			c := &Command{
-				Argv:       []string{argv0, "{question}", "{returns}", "{source}", "{mcp_config}", "q={question};r={returns};s={source}", "fixed"},
-				ToolServer: []string{"/bin/cleanroom", "reader-tools"},
+				Argv: []string{argv0, "{question}", "{returns}", "{source}", "{mcp_config}", "q={question};r={returns};s={source}", "fixed"},
+				Pipe: []string{"/bin/cleanroom", "reader-tools"},
 			}
 			if _, err := c.Answer(context.Background(), Job{Ask: 3, Source: "inbox", Question: q, Returns: json.RawMessage(r)}); err != nil {
 				t.Fatalf("question %q: %v", q, err)
@@ -110,8 +110,8 @@ func mustRead(t *testing.T, path string) string {
 func TestConfigFileIsGoneAndPrivate(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "seen")
 	c := &Command{
-		Argv:       []string{script(t, `stat -f '%Lp %N' "$1" "$(dirname "$1")" > "`+out+`" 2>/dev/null || stat -c '%a %n' "$1" "$(dirname "$1")" > "`+out+`"; echo '{"answer": 1}'`), "{mcp_config}"},
-		ToolServer: []string{"x"},
+		Argv: []string{script(t, `stat -f '%Lp %N' "$1" "$(dirname "$1")" > "`+out+`" 2>/dev/null || stat -c '%a %n' "$1" "$(dirname "$1")" > "`+out+`"; echo '{"answer": 1}'`), "{mcp_config}"},
+		Pipe: []string{"x"},
 	}
 	if _, err := c.Answer(context.Background(), Job{Ask: 1, Source: `we"ird\name`}); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestConfigFileIsGoneAndPrivate(t *testing.T) {
 // TestOutputFloodIsBounded has the reader print far more than the limit.
 // Answer must fail, quickly, without holding the flood in memory.
 func TestOutputFloodIsBounded(t *testing.T) {
-	c := &Command{Argv: []string{script(t, `head -c 100000000 /dev/zero | tr '\0' 'x'; echo; echo '{"answer": true}'`)}, ToolServer: []string{"x"}}
+	c := &Command{Argv: []string{script(t, `head -c 100000000 /dev/zero | tr '\0' 'x'; echo; echo '{"answer": true}'`)}, Pipe: []string{"x"}}
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
@@ -166,7 +166,7 @@ echo $! >> "`+pids+`"
 echo $! >> "`+pids+`"
 echo $$ >> "`+pids+`"
 sleep 60
-`)}, ToolServer: []string{"x"}}
+`)}, Pipe: []string{"x"}}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	start := time.Now()

@@ -3,18 +3,17 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"cleanroom/internal/core"
 	"cleanroom/internal/upstream"
-	"cleanroom/internal/version"
 )
 
 // readerTools is what the reader of one ask can reach: the tools of its
-// source that only read. It implements reader.Tools.
+// source that only read. It implements reader.Tools, and it reaches the
+// source through the gateway's own upstream connections, so a reader starts
+// no server and logs in nowhere.
 //
 // Listing only those tools is a convenience for the reader. The limit that
 // counts is in core.Decide, which every call below goes through under the
@@ -61,46 +60,4 @@ func (r readerTools) Call(ctx context.Context, tool string, args json.RawMessage
 		Session: r.session, Op: core.OpTool,
 		Upstream: r.source, Tool: tool, Args: args, Hint: hint,
 	}), nil
-}
-
-// readerGrace is how long past its reader's deadline an ask stays open,
-// to allow for a slow start.
-const readerGrace = time.Minute
-
-// ReaderServer builds the MCP server that a reader running as a separate
-// program connects to. It offers the read-only tools of the source of the
-// ask at askSeq, under their own names, and nothing else.
-func (g *Gateway) ReaderServer(ctx context.Context, askSeq int) (*mcp.Server, error) {
-	events, err := g.Log.Read()
-	if err != nil {
-		return nil, err
-	}
-	ask, ok := core.AskAt(events, askSeq)
-	if !ok {
-		return nil, fmt.Errorf("%d is not an ask", askSeq)
-	}
-	// An ask is normally closed by its answer. If the server that
-	// started the reader died first there is no answer, so the ask is
-	// also closed by age.
-	if age := time.Since(events[askSeq-1].Time); age > g.readerTimeout()+readerGrace {
-		return nil, fmt.Errorf("ask %d was made %s ago and is closed", askSeq, age.Round(time.Second))
-	}
-	rt := g.forReader(askSeq, ask.Call.Upstream)
-	tools, err := rt.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s := mcp.NewServer(&mcp.Implementation{Name: "cleanroom-reader-tools", Version: version.Version}, nil)
-	for _, tool := range tools {
-		s.AddTool(&mcp.Tool{
-			Name:        tool.Name,
-			Title:       tool.Title,
-			Description: tool.Description,
-			InputSchema: tool.InputSchema,
-			Annotations: tool.Annotations,
-		}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return rt.Call(ctx, tool.Name, req.Params.Arguments)
-		})
-	}
-	return s, nil
 }

@@ -25,9 +25,9 @@ type Job struct {
 	Question string
 	// Returns is the type of answer wanted, as the caller gave it.
 	Returns json.RawMessage
-	// Tools is the reader's access to its source, for a reader that runs
-	// inside this process. A reader that runs as a command connects to
-	// the same tools over MCP instead.
+	// Tools is the reader's access to its source. A reader that runs
+	// inside this process calls it directly. A reader that runs as a
+	// command reaches the same Tools over MCP.
 	Tools Tools
 }
 
