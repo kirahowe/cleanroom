@@ -36,7 +36,7 @@ func setup(t *testing.T, args string) (*Desk, *mcptest.Upstream, int) {
 		mcptest.Tool{Name: "send", Reply: "sent"},
 		mcptest.Tool{Name: "broken", Reply: "smtp is down", Fail: true},
 	)
-	log, err := eventlog.Open(t.TempDir())
+	log, err := eventlog.OpenUnsynced(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

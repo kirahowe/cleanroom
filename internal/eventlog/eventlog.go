@@ -66,6 +66,25 @@ func Open(dir string) (*Log, error) {
 	return &Log{path: filepath.Join(dir, FileName), now: time.Now, write: writeAndSync}, nil
 }
 
+// OpenUnsynced is Open for tests. Its log reports an append as done without
+// waiting for the disk, which takes milliseconds each time and which a test
+// of what gets logged has no use for. Locking and the file's format are the
+// same.
+//
+// Only tests may call it, and a test checks that. A crash could lose an
+// event from such a log after cleanroom had acted on it.
+func OpenUnsynced(dir string) (*Log, error) {
+	l, err := Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	l.write = func(f *os.File, b []byte) error {
+		_, err := f.Write(b)
+		return err
+	}
+	return l, nil
+}
+
 // Read returns every event in the log.
 func (l *Log) Read() ([]core.Event, error) {
 	var events []core.Event

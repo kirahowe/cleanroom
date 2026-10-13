@@ -4,8 +4,10 @@ package eventlog
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,7 +57,7 @@ func TestAppendAndRead(t *testing.T) {
 }
 
 func TestNothingIsAppendedOnError(t *testing.T) {
-	l, _ := Open(t.TempDir())
+	l, _ := OpenUnsynced(t.TempDir())
 	boom := errors.New("boom")
 	if _, err := l.Update(func([]core.Event) ([]core.Event, error) {
 		return []core.Event{call("a")}, boom
@@ -75,7 +77,7 @@ func TestNothingIsAppendedOnError(t *testing.T) {
 
 func TestDamagedLogIsAnError(t *testing.T) {
 	dir := t.TempDir()
-	l, _ := Open(dir)
+	l, _ := OpenUnsynced(dir)
 	l.Update(func([]core.Event) ([]core.Event, error) { return []core.Event{call("a")}, nil })
 
 	f, _ := os.OpenFile(filepath.Join(dir, FileName), os.O_APPEND|os.O_WRONLY, 0)
@@ -113,7 +115,7 @@ func TestConcurrentWriters(t *testing.T) {
 	var wg sync.WaitGroup
 	for range writers {
 		wg.Go(func() {
-			l, err := Open(dir)
+			l, err := OpenUnsynced(dir)
 			if err != nil {
 				t.Error(err)
 				return
@@ -133,7 +135,7 @@ func TestConcurrentWriters(t *testing.T) {
 	}
 	wg.Wait()
 
-	l, err := Open(dir)
+	l, err := OpenUnsynced(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,5 +150,33 @@ func TestConcurrentWriters(t *testing.T) {
 		if e.Kind == core.KindResult && e.Result.Ref != i {
 			t.Fatalf("event %d refers to %d: two writers saw the same log", e.Seq, e.Result.Ref)
 		}
+	}
+}
+
+// OpenUnsynced gives up the guarantee that a recorded event survives a
+// crash, so nothing but tests may open a log with it.
+func TestOnlyTestsOpenAnUnsyncedLog(t *testing.T) {
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != root && strings.HasPrefix(d.Name(), ".") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(src), "OpenUnsynced(") && filepath.Base(path) != "eventlog.go" {
+			t.Errorf("%s opens an unsynced log", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

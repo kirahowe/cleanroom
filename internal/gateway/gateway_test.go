@@ -62,7 +62,7 @@ func text(res *mcp.CallToolResult) string {
 
 func newLog(t *testing.T) *eventlog.Log {
 	t.Helper()
-	log, err := eventlog.Open(t.TempDir())
+	log, err := eventlog.OpenUnsynced(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

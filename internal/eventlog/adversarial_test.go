@@ -29,7 +29,7 @@ const (
 // long the log was when the worker looked, in Question, so the reader of
 // the log can tell whether look-then-append was atomic.
 func appendRounds(dir, worker string, rounds int) error {
-	l, err := Open(dir)
+	l, err := OpenUnsynced(dir)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func TestManyProcessesAndGoroutines(t *testing.T) {
 		t.Error(err)
 	}
 
-	l, _ := Open(dir)
+	l, _ := OpenUnsynced(dir)
 	log, err := l.Read()
 	if err != nil {
 		t.Fatalf("the log does not read back: %v", err)
@@ -136,7 +136,7 @@ func sound(t *testing.T) (*Log, string, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, _ := Open(dir)
+	l, _ := OpenUnsynced(dir)
 	return l, path, raw
 }
 
@@ -323,7 +323,7 @@ func FuzzReadNeverShortens(f *testing.F) {
 		}
 		path := filepath.Join(dir, FileName)
 		raw, _ := os.ReadFile(path)
-		l, _ := Open(dir)
+		l, _ := OpenUnsynced(dir)
 		want, err := l.Read()
 		if err != nil {
 			t.Fatal(err)
