@@ -125,7 +125,7 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	// Run the reader in its own process group and stop the whole group
 	// when time runs out, so that anything the reader started goes too.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.Cancel = func() error { killGroup(cmd.Process.Pid); return nil }
 	cmd.WaitDelay = 2 * time.Second
 	var out capped
 	cmd.Stdout = &out
@@ -133,12 +133,31 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	err = cmd.Run()
 	// Whatever the reader left running goes too, even after a clean exit.
 	if cmd.Process != nil {
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		killGroup(cmd.Process.Pid)
 	}
 	if err != nil {
 		return nil, failure(ctx.Err(), cmd.ProcessState.ExitCode(), err)
 	}
 	return ParseOutput(out.buf.Bytes())
+}
+
+// killGroupLimit bounds how long killGroup keeps at a group that will not
+// empty.
+const killGroupLimit = 2 * time.Second
+
+// killGroup kills every process in a process group, and keeps killing
+// until the group is empty. One kill is not enough: a process that is
+// being started while the kill goes round can be missed, and a reader that
+// keeps starting processes would then outlive it.
+//
+// It does not reach a process that has moved itself to another group.
+func killGroup(pgid int) {
+	for deadline := time.Now().Add(killGroupLimit); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		// The kill fails once no process is left to signal.
+		if syscall.Kill(-pgid, syscall.SIGKILL) != nil {
+			return
+		}
+	}
 }
 
 // substitute fills the placeholders in a reader's command line. Each

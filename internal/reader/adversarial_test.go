@@ -107,29 +107,48 @@ func TestCappedWriterKeepsOnlyTheLimit(t *testing.T) {
 	}
 }
 
-// TestStoppingKillsTheWholeProcessGroup starts a reader that forks children
-// which ignore hangup and hold the pipes. When the job is stopped all of
-// them must be gone. The reader says when its children are running by
-// writing to a named pipe, so the test stops it then and waits for nothing.
-// After that the reader starts no more processes: one started while the
-// group is being killed can be missed, and holds the pipes until the wait
-// delay runs out.
-func TestStoppingKillsTheWholeProcessGroup(t *testing.T) {
+// chainLength is where the reader in TestStoppingKillsAReaderThatKeepsForking
+// stops by itself, so that a failing test leaves nothing running for long.
+const chainLength = 400
+
+// TestStoppingKillsAReaderThatKeepsForking stops a reader that is a chain
+// of processes, each of which ignores hangup, holds the pipes, starts the
+// next and waits for it. The chain is still growing when the job is
+// stopped, which is the case one kill of the process group gets wrong: it
+// misses a process that was being started as it went round, and the chain
+// carries on from there.
+//
+// The reader says when the chain is under way by writing to a named pipe,
+// so the test stops it then and waits for nothing.
+func TestStoppingKillsAReaderThatKeepsForking(t *testing.T) {
 	dir := t.TempDir()
 	pids, ready := filepath.Join(dir, "pids"), filepath.Join(dir, "ready")
 	if err := syscall.Mkfifo(ready, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := &Command{Argv: sh(`
+	link := `
 trap '' HUP TERM INT
-(trap '' HUP TERM INT; exec sleep 60) &
-echo $! >> "` + pids + `"
-(trap '' HUP TERM INT; exec sleep 60) &
-echo $! >> "` + pids + `"
 echo $$ >> "` + pids + `"
-echo ready > "` + ready + `"
+[ "$1" = 5 ] && echo ready > "` + ready + `"
+[ "$1" -lt ` + strconv.Itoa(chainLength) + ` ] && /bin/sh -c "$0" "$0" $(($1+1)) &
 wait
-`), Pipe: []string{"x"}}
+`
+	started := func() []int {
+		var all []int
+		for field := range strings.FieldsSeq(mustRead(t, pids)) {
+			if pid, _ := strconv.Atoi(field); pid > 1 {
+				all = append(all, pid)
+			}
+		}
+		return all
+	}
+	t.Cleanup(func() {
+		for _, pid := range started() {
+			syscall.Kill(pid, syscall.SIGKILL) // pids this test started
+		}
+	})
+
+	c := &Command{Argv: []string{"/bin/sh", "-c", link, link, "0"}, Pipe: []string{"x"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -139,11 +158,14 @@ wait
 	if _, err := c.Answer(ctx, Job{Ask: 1, Source: "mail"}); err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Errorf("err = %v, want an interruption", err)
 	}
-	for field := range strings.FieldsSeq(mustRead(t, pids)) {
-		pid, _ := strconv.Atoi(field)
-		if pid > 1 && !gone(pid) {
+
+	links := started()
+	if len(links) >= chainLength {
+		t.Errorf("the chain ran to its end, %d links, after the job was stopped", len(links))
+	}
+	for _, pid := range links {
+		if !gone(pid) {
 			t.Errorf("process %d of the reader's group is still running", pid)
-			syscall.Kill(pid, syscall.SIGKILL) // a pid this test started
 		}
 	}
 }
