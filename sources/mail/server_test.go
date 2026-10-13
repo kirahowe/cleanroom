@@ -14,7 +14,6 @@ import (
 type fakeMailbox struct {
 	searchQuery string
 	searchLimit int
-	sent        []Outgoing
 	err         error
 }
 
@@ -31,16 +30,11 @@ func (f *fakeMailbox) Read(_ context.Context, id string) (Message, error) {
 	return Message{ID: id, From: "ann@example.com", Subject: "Hi", Text: "body"}, nil
 }
 
-func (f *fakeMailbox) Send(_ context.Context, m Outgoing) error {
-	f.sent = append(f.sent, m)
-	return f.err
-}
-
-func connect(t *testing.T, mb Mailbox, allowed []string) *mcp.ClientSession {
+func connect(t *testing.T, mb Mailbox) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
-	ss, err := newServer(mb, allowed).Connect(ctx, st, nil)
+	ss, err := newServer(mb).Connect(ctx, st, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,18 +63,19 @@ func errorText(res *mcp.CallToolResult) string {
 	return res.Content[0].(*mcp.TextContent).Text
 }
 
+// TestToolList also pins what is absent: the server offers search and read
+// and nothing else, so there is no tool that sends.
 func TestToolList(t *testing.T) {
-	cs := connect(t, &fakeMailbox{}, nil)
+	cs := connect(t, &fakeMailbox{})
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	type hints struct{ readOnly, destructive, openWorld *bool }
+	type hints struct{ readOnly, openWorld *bool }
 	flag := func(b bool) *bool { return &b }
 	want := map[string]hints{
 		"search": {readOnly: flag(true), openWorld: flag(false)},
 		"read":   {readOnly: flag(true), openWorld: flag(false)},
-		"send":   {readOnly: flag(false), destructive: flag(false), openWorld: flag(true)},
 	}
 	if len(res.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(res.Tools))
@@ -101,9 +96,6 @@ func TestToolList(t *testing.T) {
 		if a.OpenWorldHint == nil || *a.OpenWorldHint != *w.openWorld {
 			t.Errorf("%s: openWorldHint = %v", tool.Name, a.OpenWorldHint)
 		}
-		if w.destructive != nil && (a.DestructiveHint == nil || *a.DestructiveHint != *w.destructive) {
-			t.Errorf("%s: destructiveHint = %v", tool.Name, a.DestructiveHint)
-		}
 		schema, _ := json.Marshal(tool.InputSchema)
 		if strings.Count(string(schema), `"description"`) < 1 {
 			t.Errorf("%s: arguments lack descriptions: %s", tool.Name, schema)
@@ -113,7 +105,7 @@ func TestToolList(t *testing.T) {
 
 func TestSearch(t *testing.T) {
 	mb := &fakeMailbox{}
-	cs := connect(t, mb, nil)
+	cs := connect(t, mb)
 
 	res := call(t, cs, "search", map[string]any{"query": " from:ann "})
 	if res.IsError {
@@ -144,7 +136,7 @@ func TestSearch(t *testing.T) {
 }
 
 func TestRead(t *testing.T) {
-	cs := connect(t, &fakeMailbox{}, nil)
+	cs := connect(t, &fakeMailbox{})
 	res := call(t, cs, "read", map[string]any{"id": "m1"})
 	if res.IsError || !strings.Contains(errorText(res), `"text":"body"`) {
 		t.Errorf("read: %v %s", res.IsError, errorText(res))
@@ -154,64 +146,5 @@ func TestRead(t *testing.T) {
 	}
 	if res := call(t, cs, "read", map[string]any{"id": ""}); !res.IsError {
 		t.Error("empty id should fail")
-	}
-}
-
-func TestSend(t *testing.T) {
-	mb := &fakeMailbox{}
-	cs := connect(t, mb, nil)
-	res := call(t, cs, "send", map[string]any{"to": []string{"Bob <bob@example.com>"}, "subject": "Hi", "body": "text"})
-	if res.IsError {
-		t.Fatal(errorText(res))
-	}
-	if len(mb.sent) != 1 || mb.sent[0].To[0] != "bob@example.com" || mb.sent[0].Body != "text" {
-		t.Errorf("sent = %+v", mb.sent)
-	}
-	raw, _ := json.Marshal(res.StructuredContent)
-	if string(raw) != `{"recipients":["bob@example.com"],"status":"sent"}` {
-		t.Errorf("structured content: %s", raw)
-	}
-}
-
-func TestSendBackendError(t *testing.T) {
-	cs := connect(t, &fakeMailbox{err: errors.New("smtp down")}, nil)
-	res := call(t, cs, "send", map[string]any{"to": []string{"a@example.com"}, "subject": "s", "body": "b"})
-	if !res.IsError || !strings.Contains(errorText(res), "smtp down") {
-		t.Errorf("got %v %s", res.IsError, errorText(res))
-	}
-}
-
-func TestSendAllowlist(t *testing.T) {
-	mb := &fakeMailbox{}
-	cs := connect(t, mb, []string{"ok@example.com"})
-
-	res := call(t, cs, "send", map[string]any{"to": []string{"OK@Example.com"}, "subject": "s", "body": "b"})
-	if res.IsError {
-		t.Errorf("allowed recipient refused: %s", errorText(res))
-	}
-	mb.sent = nil
-
-	res = call(t, cs, "send", map[string]any{"to": []string{"ok@example.com", "evil@example.com"}, "subject": "s", "body": "b"})
-	if !res.IsError || !strings.Contains(errorText(res), "evil@example.com") {
-		t.Errorf("got %v %s", res.IsError, errorText(res))
-	}
-	if len(mb.sent) != 0 {
-		t.Error("mailbox was called despite a refused recipient")
-	}
-}
-
-func TestSendRejectsHeaderInjection(t *testing.T) {
-	mb := &fakeMailbox{}
-	cs := connect(t, mb, nil)
-	for name, args := range map[string]map[string]any{
-		"subject": {"to": []string{"a@example.com"}, "subject": "hi\r\nBcc: evil@example.com", "body": "b"},
-		"address": {"to": []string{"a@example.com\r\nBcc: evil@example.com"}, "subject": "s", "body": "b"},
-	} {
-		if res := call(t, cs, "send", args); !res.IsError {
-			t.Errorf("%s injection was accepted", name)
-		}
-	}
-	if len(mb.sent) != 0 {
-		t.Error("mailbox was called")
 	}
 }

@@ -61,8 +61,8 @@ func TestTypedAnswerComesBackAndCallerStaysUncontaminated(t *testing.T) {
 }
 
 // TestObedientReaderGetsNowhere scripts a reader that does everything the
-// poisoned message tells it to: it tries to send the inbox away, then
-// answers with the attacker's text.
+// poisoned message tells it to: it tries to send the inbox away with a
+// tool its source does not have, then answers with the attacker's text.
 func TestObedientReaderGetsNowhere(t *testing.T) {
 	w := newWorld(t)
 	var sendResult string
@@ -83,10 +83,8 @@ func TestObedientReaderGetsNowhere(t *testing.T) {
 	if !strings.HasPrefix(sendResult, "REFUSED") {
 		t.Errorf("the reader's send returned %q, want a refusal", sendResult)
 	}
-	for _, c := range w.fakes["inbox"].Seen() {
-		if strings.HasPrefix(c, "send") {
-			t.Errorf("the reader's send reached the upstream: %s", c)
-		}
+	if diff := cmp.Diff([]string{`read {"id":"m1"}`}, w.fakes["inbox"].Seen()); diff != "" {
+		t.Errorf("inbox calls (-want +got):\n%s", diff)
 	}
 	if w.labels("chief").Contaminated {
 		t.Error("the caller is contaminated")
@@ -228,11 +226,13 @@ func TestAskFailures(t *testing.T) {
 }
 
 // TestReaderIsOfferedOnlyReadTools looks at the tools as a reader is
-// handed them. They go through the gateway's own upstream connections, and
-// they stop working once the ask is answered.
+// handed them. They go through the gateway's own upstream connections, a
+// tool of the source that acts is refused, and they all stop working once
+// the ask is answered.
 func TestReaderIsOfferedOnlyReadTools(t *testing.T) {
 	w := newWorld(t)
 	var offered []string
+	var archived string
 	var tools reader.Tools
 	w.useReader(func(ctx context.Context, job reader.Job) ([]byte, error) {
 		list, err := job.Tools.List(ctx)
@@ -245,6 +245,8 @@ func TestReaderIsOfferedOnlyReadTools(t *testing.T) {
 		if _, err := job.Tools.Call(ctx, "search", json.RawMessage(`{"query":"x"}`)); err != nil {
 			return nil, err
 		}
+		res, _ := job.Tools.Call(ctx, "archive", json.RawMessage(`{"id":"m1"}`))
+		archived = text(res)
 		tools = job.Tools // kept past the answer, as a reader left running would
 		return []byte(`true`), nil
 	})
@@ -255,6 +257,12 @@ func TestReaderIsOfferedOnlyReadTools(t *testing.T) {
 	}
 	if diff := cmp.Diff([]string{"read", "search"}, offered); diff != "" {
 		t.Errorf("reader tools (-want +got):\n%s", diff)
+	}
+	if !strings.HasPrefix(archived, "REFUSED") {
+		t.Errorf("the reader's archive returned %q, want a refusal", archived)
+	}
+	if diff := cmp.Diff([]string{`search {"query":"x"}`}, w.fakes["inbox"].Seen()); diff != "" {
+		t.Errorf("inbox calls (-want +got):\n%s", diff)
 	}
 	seen := len(w.fakes["inbox"].Seen())
 	after, err := tools.Call(context.Background(), "search", nil)

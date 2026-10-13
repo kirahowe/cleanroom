@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"net"
 	"net/http"
 	"net/mail"
-	"net/smtp"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -20,29 +18,19 @@ import (
 
 const (
 	httpTimeout     = 10 * time.Second
-	smtpTimeout     = 15 * time.Second
 	maxResponseSize = 4 << 20
 )
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// mailpit reads through Mailpit's HTTP API and sends over SMTP.
+// mailpit reads through Mailpit's HTTP API. It has no way to send.
 type mailpit struct {
-	baseURL  *url.URL
-	smtpAddr string
-	from     *mail.Address
-	client   *http.Client
-	now      func() time.Time
+	baseURL *url.URL
+	client  *http.Client
 }
 
-func newMailpit(baseURL *url.URL, smtpAddr string, from *mail.Address) *mailpit {
-	return &mailpit{
-		baseURL:  baseURL,
-		smtpAddr: smtpAddr,
-		from:     from,
-		client:   &http.Client{Timeout: httpTimeout},
-		now:      time.Now,
-	}
+func newMailpit(baseURL *url.URL) *mailpit {
+	return &mailpit{baseURL: baseURL, client: &http.Client{Timeout: httpTimeout}}
 }
 
 // Mailpit API shapes, limited to the fields we use.
@@ -158,59 +146,6 @@ func (m *mailpit) get(ctx context.Context, pathAndQuery string, dst any) error {
 		return fmt.Errorf("decoding mailpit response: %w", err)
 	}
 	return nil
-}
-
-// Send delivers msg over plain SMTP, with no authentication and no TLS.
-func (m *mailpit) Send(ctx context.Context, msg Outgoing) error {
-	id, err := newMessageID(m.from)
-	if err != nil {
-		return err
-	}
-	data, err := msg.build(m.from, m.now(), id)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, smtpTimeout)
-	defer cancel()
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", m.smtpAddr)
-	if err != nil {
-		return fmt.Errorf("connecting to smtp: %w", err)
-	}
-	defer conn.Close()
-	deadline, _ := ctx.Deadline()
-	if err := conn.SetDeadline(deadline); err != nil {
-		return err
-	}
-	// Close the connection if the context ends first, so blocked reads fail.
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
-
-	host, _, _ := net.SplitHostPort(m.smtpAddr)
-	c, err := smtp.NewClient(conn, host)
-	if err != nil {
-		return fmt.Errorf("smtp greeting: %w", err)
-	}
-	if err := c.Mail(m.from.Address); err != nil {
-		return fmt.Errorf("smtp MAIL FROM: %w", err)
-	}
-	for _, rcpt := range msg.To {
-		if err := c.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("smtp RCPT TO %s: %w", rcpt, err)
-		}
-	}
-	w, err := c.Data()
-	if err != nil {
-		return fmt.Errorf("smtp DATA: %w", err)
-	}
-	if _, err := w.Write(data); err != nil {
-		return fmt.Errorf("smtp write: %w", err)
-	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("smtp send: %w", err)
-	}
-	return c.Quit()
 }
 
 var (

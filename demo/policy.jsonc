@@ -12,10 +12,7 @@
 	"upstreams": {
 		// The inbox is the hard case: private, and anyone can put text in it.
 		"mail": {
-			"command": ["../bin/mail-source",
-				"--mailpit-url", "http://127.0.0.1:18025",
-				"--smtp-addr", "127.0.0.1:11025",
-				"--from", "you@cleanroom.test"],
+			"command": ["../bin/mail-source", "--mailpit-url", "http://127.0.0.1:18025"],
 			"labels": ["contaminated", "private"],
 
 			// Agents cannot read mail directly. They ask, and a reader reads.
@@ -25,19 +22,19 @@
 				"--question", "{question}",
 				"--returns", "{returns}"],
 
+			// These are all the tools the mail server has. It cannot send,
+			// so there is no send tool here to allow or to hold.
 			"tools": {
 				"search": {"class": "read"},
 				"read": {"class": "read"},
-				// Sending acts for the user. Cleanroom discards what the
-				// tool returns and tells the caller only whether it ran, so
-				// sending does not contaminate the caller.
-				"send": {"class": "act", "discard_result": true},
 			},
 		},
 
 		// A calendar and reminders, written to local files. The server
 		// describes its create tools as non-destructive writes. The policy
 		// overrides that: creating an event is acting for the user.
+		// Cleanroom discards what these tools return and tells the caller
+		// only whether they ran.
 		"calendar": {
 			"command": ["../bin/calendar-source", "--dir", ".cleanroom/calendar"],
 			"labels": [],

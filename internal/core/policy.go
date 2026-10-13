@@ -57,7 +57,7 @@ type Tool struct {
 	// DiscardResult makes cleanroom drop what the tool returns. The
 	// caller is told only whether the call worked, so it takes on no
 	// labels from it. Use it for tools called for their effect, such as
-	// sending a message: without it, calling a tool of an untrusted
+	// creating an event: without it, calling a tool of an untrusted
 	// source contaminates the caller, whatever the tool returns.
 	DiscardResult bool `json:"discard_result,omitempty"`
 }
@@ -74,8 +74,8 @@ const (
 	// Egress can carry data out but does nothing in the user's name, such
 	// as fetching a URL. Held when the session is contaminated and private.
 	Egress Class = "egress"
-	// Act does something in the user's name, such as sending mail or
-	// creating a calendar event. Held when the session is contaminated.
+	// Act does something in the user's name, such as creating a calendar
+	// event. Held when the session is contaminated.
 	Act Class = "act"
 )
 

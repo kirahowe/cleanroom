@@ -2,17 +2,16 @@ package main
 
 import "context"
 
-// Mailbox is the backend-neutral view of a mailbox. Implementations must
-// treat every argument as untrusted text, and must not read credentials or
-// addresses from anywhere but their own configuration.
+// Mailbox is the backend-neutral view of a mailbox. It can only be read:
+// there is no method that sends, so no tool built on it can. Implementations
+// must treat every argument as untrusted text, and must not read credentials
+// or addresses from anywhere but their own configuration.
 type Mailbox interface {
 	// Search returns at most limit messages matching query, newest first.
 	// The query syntax is defined by the backend.
 	Search(ctx context.Context, query string, limit int) ([]Summary, error)
 	// Read returns one message with its plain text body.
 	Read(ctx context.Context, id string) (Message, error)
-	// Send delivers a message that has already been validated by newOutgoing.
-	Send(ctx context.Context, msg Outgoing) error
 }
 
 // Summary is one search hit.

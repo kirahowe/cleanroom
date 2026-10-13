@@ -1,6 +1,6 @@
 // Command mail-source is a stdio MCP server that exposes a mailbox through
-// the search, read and send tools. Logs go to stderr because stdout carries
-// the protocol.
+// the search and read tools. It cannot send mail. Logs go to stderr because
+// stdout carries the protocol.
 package main
 
 import (
@@ -21,8 +21,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	mailbox := newMailpit(cfg.mailpitURL, cfg.smtpAddr, cfg.from)
-	server := newServer(mailbox, cfg.allowed)
+	server := newServer(newMailpit(cfg.mailpitURL))
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
