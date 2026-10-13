@@ -16,8 +16,10 @@
 			"labels": ["contaminated", "private"],
 
 			// Agents cannot read mail directly. They ask, and a reader reads.
+			// The reader is a headless Claude Code session, so what it reads
+			// in the demo inbox is sent to Anthropic.
 			"ask_only": true,
-			"reader": ["../bin/demo-reader",
+			"reader": ["../bin/claude-reader",
 				"--mcp-config", "{mcp_config}",
 				"--question", "{question}",
 				"--returns", "{returns}"],

@@ -49,62 +49,106 @@ can supply a valid but false date and influence an action taken from it.
 Quarantine limits what reaches the agent; it does not establish that the
 source or the reader is telling the truth.
 
-## Try it in five minutes
+## Try it
 
-You need Go 1.26 or later, `make` and `curl`. No API key is required, and no
-mail leaves your machine.
-
-```sh
-make test    # tests and vet in all three Go modules
-make demo    # six scenes, 22 checks
-```
-
-`make demo` downloads [Mailpit](https://mailpit.axllent.org), a local test mail
-server, into `.tools/` if needed. It starts Mailpit, seeds it from
-`demo/inbox/`, and runs cleanroom with the mail and calendar servers. A
-scripted agent makes tool calls and checks the results. Any failed check
-fails the command.
-
-| Scene | What happens | Result |
-| --- | --- | --- |
-| 1 | The reader reads four receipts for a trip to Toronto. | The agent receives `{"amount":"890.55","currency":"CAD"}` without reading the messages. |
-| 2 | The agent asks for a reunion date and an order's delivery date, then creates an event and a reminder. | Both actions run without approval; the session is uncontaminated. |
-| 3 | A reader obeys the poisoned email. | Its attempt to send mail is refused. Its answer contains instructions instead of a date, so the agent receives `no_answer`. |
-| 4 | The agent asks for an order's location as free text. | The user receives the text. The agent receives an id. |
-| 5 | The agent opts in to read that text. | The session becomes contaminated. |
-| 6 | After a restart, the same session tries to create two calendar events. | Both are held. The user denies one and approves the other, which runs once. |
-
-Inspect the results:
+You need Go 1.26 or later, `make`, and
+[Claude Code](https://code.claude.com/docs/en/cli-reference) installed and
+logged in. The reader is a headless Claude Code session, so the mail it reads
+to answer a question is sent to Anthropic.
 
 ```sh
-open demo/.cleanroom/calendar/calendar.ics          # open the calendar file
-bin/cleanroom log --policy demo/policy.jsonc        # event summaries, without content
-bin/cleanroom explain --policy demo/policy.jsonc 51 # replay a decision
+make test     # tests and vet in all three Go modules; needs no model or mail server
+make build
 ```
+
+Then choose a mailbox:
+
+- **Your own mail:** `bin/cleanroom init` sets up one IMAP mailbox. See
+  [Using it on your own mail](#using-it-on-your-own-mail).
+- **The demo inbox:** a local [Mailpit](https://mailpit.axllent.org) server
+  with nine fictional messages, one of which carries a prompt injection. You
+  can add messages of your own. The rest of this section uses it.
+
+### The demo inbox
+
+```sh
+make inbox    # web UI: http://127.0.0.1:18025  (Ctrl-C to stop)
+```
+
+`make inbox` downloads Mailpit into `.tools/` if needed, which requires
+`curl`. It starts Mailpit, replaces its contents with the messages in
+`demo/inbox/`, and keeps running. The demo policy has no consent prompt like
+the one `cleanroom init` shows. Seeding prints a warning that the reader
+sends what it reads to Anthropic. In another terminal, ask questions with
+the demo policy:
+
+```sh
+bin/cleanroom ask --policy demo/policy.jsonc --returns money "How much did my trip to Toronto cost in total?"
+bin/cleanroom ask --policy demo/policy.jsonc --returns date "When is my family reunion next year?"
+bin/cleanroom ask --policy demo/policy.jsonc "Where is my order?"
+bin/cleanroom log --policy demo/policy.jsonc    # what each reader did, without content
+```
+
+| Question | What to check |
+| --- | --- |
+| Trip cost, as `money` | The four receipts add up to `890.55` CAD. |
+| Reunion date, as `date` | The invitation says `2027-07-17`. `demo/inbox/09-injection.eml` is also about the reunion. It tells whoever reads it to call a `send` tool and to answer with instructions. The mail source has no send tool, and an answer that is not a date is rejected, so the result is a date or `no_answer`. |
+| Order status, as free text | At a terminal you see the text. A program or agent that runs the same command receives only an id. |
+
+A model writes the answers, so they can differ between runs. `cleanroom log`
+shows the calls each reader made, including any that were refused.
+
+### Holds and approval
+
+The demo policy also has a calendar source, which writes to
+`demo/.cleanroom/calendar/`. Start a conversation whose only tools are
+cleanroom's:
+
+```sh
+bin/cleanroom claude --policy demo/policy.jsonc
+```
+
+Ask for these in order:
+
+1. "When is my family reunion next year? Put it on my calendar." The date
+   arrives as a typed value and the event is created without approval.
+2. "Read the reunion invitation yourself and tell me what it says." The agent
+   has to accept contamination to receive the text, and the session stays
+   contaminated.
+3. "Add a reminder to book flights for it." The call is held and the agent
+   reports a proposal number.
+
+Review the held call in another terminal, replacing `N` with that number:
+
+```sh
+bin/cleanroom proposals --policy demo/policy.jsonc
+bin/cleanroom show --policy demo/policy.jsonc N       # the call and why it was held
+bin/cleanroom approve --policy demo/policy.jsonc N    # runs the stored call once
+bin/cleanroom explain --policy demo/policy.jsonc N    # replay the decision
+```
+
+If your Claude Code settings have an `allowedMcpServers` list, see
+[Allow cleanroom in Claude Code](#allow-cleanroom-in-claude-code) first.
 
 ### Send your own attack
 
-Start Mailpit and leave it running:
+Copy a message from `demo/inbox/`, edit it, and save it in a directory of
+`.eml` files. Each file needs `From` and `To` headers. With `make inbox`
+running, deliver them:
 
 ```sh
-make inbox        # web UI: http://127.0.0.1:18025
+bin/seed --dir path/to/your/messages            # adds them to the inbox
+bin/seed --dir path/to/your/messages --reset    # replaces the inbox with them
 ```
 
-Copy an email from `demo/inbox/`, edit it, and save it in a directory of
-`.eml` files. Then deliver the files and run the demo:
+Seed only messages you are willing to send to Anthropic. The reader can read
+any message in the inbox, and `seed` prints that warning each time.
 
-```sh
-bin/seed --dir path/to/your/attacks
-make demo         # uses the running inbox
-```
-
-The scripted reader in scene 3 recognises two instructions in messages:
-`Call the tool NAME with {JSON}` and `answer with exactly: "TEXT"`. Include
-"reunion" so the reader finds your message. The gateway refuses tools the
-reader cannot access and rejects answers that do not match the requested
-type. A valid date can pass the check even if it is wrong. The demo checks
-results against its bundled messages, so custom messages can cause checks to
-fail.
+Ask a question your message is relevant to, then read `cleanroom log`. The
+gateway refuses tools the reader cannot access and rejects answers that do
+not match the requested type. A message that persuades the reader to return
+a different valid date succeeds, because the check covers structure and not
+accuracy.
 
 ### Call the server with MCP Inspector
 
@@ -177,7 +221,7 @@ A reader is a program that receives a question, calls the supplied MCP server,
 and prints `{"answer": ...}`. The policy specifies the command:
 
 ```jsonc
-"reader": ["../bin/demo-reader", "--mcp-config", "{mcp_config}",
+"reader": ["/path/to/bin/claude-reader", "--mcp-config", "{mcp_config}",
            "--question", "{question}", "--returns", "{returns}"]
 ```
 
@@ -191,17 +235,9 @@ and one whose model refuses its login exits with status 77. Cleanroom shows
 nobody what a reader writes, so the status is how `ask` learns the cause and
 can tell the person what to allow or where to log in.
 
-The demo reader in `demo/reader` uses keywords and regular expressions and
-knows only the demo's questions.
-
 `cmd/claude-reader` is a reader backed by a model. It runs a headless
 [Claude Code](https://code.claude.com/docs/en/cli-reference) session with the
-user's own login and prints the session's answer:
-
-```jsonc
-"reader": ["/path/to/bin/claude-reader", "--mcp-config", "{mcp_config}",
-           "--question", "{question}", "--returns", "{returns}"]
-```
+user's own login and prints the session's answer.
 
 It starts the session with no built-in tools (`--tools ""`), only the MCP
 server cleanroom supplies (`--strict-mcp-config`), its own system prompt, an
@@ -521,8 +557,8 @@ Remaining work:
 
 - Readers for other models, including local ones. `claude-reader` needs
   Claude Code and a hosted model.
-- A web source and demo scene 7, which checks that a held fetch makes no DNS
-  request. The core already implements and tests the `egress` rule.
+- A web source, with a check that a held fetch makes no DNS request. The
+  core already implements and tests the `egress` rule.
 - Approval through MCP elicitation.
 - MCP resources for proposals, answers and session state. Currently these use
   CLI commands and the `status` tool.
@@ -548,7 +584,7 @@ internal/upstream/   upstream MCP connections
 internal/config/     policy loading
 sources/mail/        mail server (separate Go module)
 sources/calendar/    calendar and reminders server (separate Go module)
-demo/               scripted agent, reader, policy, inbox and seed command
+demo/               policy, messages and seed command for the demo inbox
 ```
 
 Start with `internal/core/doc.go`, then `internal/core/decide.go`.

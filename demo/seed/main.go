@@ -3,7 +3,8 @@
 // shipping update, and one message that carries a prompt injection.
 //
 // It talks only to the Mailpit it is pointed at, and checks that the server
-// really is Mailpit before sending anything.
+// really is Mailpit before sending anything. It ends with a warning that the
+// demo policy's reader sends what it reads to Anthropic.
 package main
 
 import (
@@ -50,8 +51,15 @@ func main() {
 			log.Fatalf("%s: %v", file, err)
 		}
 	}
-	fmt.Printf("seeded %d messages; open %s to see the inbox\n", len(files), *api)
+	fmt.Printf("seeded %d messages; open %s to see the inbox\n\n%s", len(files), *api, readerWarning)
 }
+
+// readerWarning is printed after every seeding, because nothing else asks
+// before the demo policy's reader runs. A real mailbox goes through
+// "cleanroom init", which asks for consent; the demo inbox does not.
+const readerWarning = `The demo policy's reader is Claude Code. Any message in this inbox that it
+reads to answer a question, including messages you add, is sent to Anthropic.
+`
 
 var client = &http.Client{Timeout: 5 * time.Second}
 
