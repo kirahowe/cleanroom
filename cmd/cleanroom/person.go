@@ -113,7 +113,7 @@ func showCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			fmt.Fprintf(c.stdout, "\nTo decide: cleanroom approve%[2]s %[1]d, or cleanroom deny%[2]s %[1]d\n", seq, c.hintFlags())
 			return nil
 		}
-		screen, err := approval.AnswerScreen(events, seq)
+		screen, err := approval.AnswerScreen(events, seq, c.width)
 		if err != nil {
 			return fmt.Errorf("%d is neither a held call nor an ask", seq)
 		}

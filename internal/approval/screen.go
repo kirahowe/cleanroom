@@ -52,14 +52,15 @@ func Screen(p core.Policy, log []core.Event, seq int) (string, error) {
 }
 
 // AnswerScreen renders the stored answer to the ask at seq for the person.
-func AnswerScreen(log []core.Event, seq int) (string, error) {
+// width is the width of their terminal in columns, or 0 when it is unknown.
+func AnswerScreen(log []core.Event, seq, width int) (string, error) {
 	if seq < 1 || seq > len(log) || log[seq-1].Kind != core.KindCall || log[seq-1].Call.Call.Op != core.OpAsk {
 		return "", fmt.Errorf("%d is not an ask", seq)
 	}
 	c := log[seq-1].Call.Call
 	var b strings.Builder
-	fmt.Fprintf(&b, "Ask %d, put to %q by session %q\n", seq, visible(c.Upstream), visible(c.Session))
-	fmt.Fprintf(&b, "Question:\n%s\n", block(c.Question))
+	fmt.Fprintf(&b, "Ask %d to %q, from session %q\n\n", seq, visible(c.Upstream), visible(c.Session))
+	fmt.Fprintf(&b, "Question\n%s\n", prose(c.Question, width))
 
 	ans, ok := core.AnswerTo(log, seq)
 	switch {
@@ -70,12 +71,12 @@ func AnswerScreen(log []core.Event, seq int) (string, error) {
 	case ans.Outcome == core.OutcomeTyped:
 		fmt.Fprintf(&b, "Answer (a checked value): %s\n", visible(string(ans.Value)))
 	default:
-		b.WriteString("Answer:\n")
-		b.WriteString(block(ans.Text))
+		b.WriteString("Answer\n")
+		b.WriteString(prose(ans.Text, width))
 		if ans.Labels.Contaminated {
-			b.WriteString("\nThis text was written by a reader that read untrusted content. It may be\n" +
-				"wrong, and it may be trying to persuade you. It has been shown to you and\n" +
-				"not to the agent.\n")
+			b.WriteString("\n" + paragraph("This text was written by a reader that read untrusted content. "+
+				"It may be wrong, and it may be trying to persuade you. "+
+				"It has been shown to you and not to the agent.", width))
 		}
 	}
 	return b.String(), nil
@@ -109,6 +110,112 @@ func block(text string) string {
 		fmt.Fprintf(&b, "    | %s\n", visible(line))
 	}
 	return b.String()
+}
+
+const (
+	// proseBar starts every row of prose.
+	proseBar = "  │ "
+	// A screen is laid out for 80 columns when the terminal's width is
+	// unknown, and never wider than 88, past which lines are hard to read.
+	defaultWidth, minWidth, maxWidth = 80, 40, 88
+)
+
+// prose lays out untrusted text that is meant to be read, a question or an
+// answer, behind a bar. Like block it lets the text span lines without
+// letting any of it pass for the screen around it.
+//
+// Long lines are wrapped to the terminal's width here, so that the terminal
+// has nothing left to wrap. A line the terminal wraps continues at the left
+// edge, in front of the bar. That is hard to read, and text padded to the
+// right length could use it to draw a line of its own there.
+//
+// Wrapping changes the spacing: a run of spaces becomes one, and a line
+// break the writer made looks like one made here. Use block for text that
+// has to be shown exactly.
+func prose(text string, width int) string {
+	var b strings.Builder
+	for line := range strings.SplitSeq(strings.Trim(text, "\n"), "\n") {
+		for _, row := range wrap(visible(line), layoutWidth(width)-columns(proseBar)) {
+			b.WriteString(strings.TrimRight(proseBar+row, " ") + "\n")
+		}
+	}
+	return b.String()
+}
+
+// paragraph lays out a paragraph of cleanroom's own text.
+func paragraph(text string, width int) string {
+	return strings.Join(wrap(text, layoutWidth(width)), "\n") + "\n"
+}
+
+// layoutWidth is the width a screen is laid out for on a terminal of the
+// given width, where 0 means unknown.
+func layoutWidth(terminal int) int {
+	switch {
+	case terminal <= 0:
+		return defaultWidth
+	case terminal < minWidth:
+		return minWidth
+	case terminal > maxWidth:
+		return maxWidth
+	}
+	return terminal
+}
+
+// wrap breaks one line into rows of at most width columns, at spaces where
+// it can and inside a word that is longer than a row. The rows keep the
+// line's indentation, so a wrapped list item stays under its first row.
+func wrap(line string, width int) []string {
+	indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+	indent = indent[:min(len(indent), width/2)]
+	var rows []string
+	row, used := indent, len(indent)
+	flush := func() {
+		rows = append(rows, row)
+		row, used = indent, len(indent)
+	}
+	for _, word := range strings.Fields(line) {
+		if used > len(indent) && used+1+columns(word) > width {
+			flush()
+		}
+		if used > len(indent) {
+			row, used = row+" ", used+1
+		}
+		for columns(word) > width-used {
+			head, tail := cut(word, width-used)
+			row += head
+			flush()
+			word = tail
+		}
+		row, used = row+word, used+columns(word)
+	}
+	return append(rows, row)
+}
+
+// cut splits a word after as many characters as fit in width columns, and
+// after one when none fits.
+func cut(word string, width int) (head, tail string) {
+	used := 0
+	for i, r := range word {
+		used += columns(string(r))
+		if used > width && i > 0 {
+			return word[:i], word[i:]
+		}
+	}
+	return word, ""
+}
+
+// columns is how wide s is drawn, at most. Characters from Hangul Jamo on
+// are counted as two columns. Many of them take one, and counting those as
+// two only wraps a line early.
+func columns(s string) int {
+	n := 0
+	for _, r := range s {
+		n++
+		if r >= 0x1100 {
+			n++
+		}
+	}
+	return n
 }
 
 // invisible lists characters that count as printable but draw nothing, or

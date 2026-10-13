@@ -7,6 +7,7 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -194,5 +195,90 @@ func TestScreenValuesCannotForgeScreenLines(t *testing.T) {
 	}
 	if !strings.HasSuffix(strings.TrimSpace(screen), d.proposal(t, held).Call.Hash) {
 		t.Error("the real hash is not the last line")
+	}
+}
+
+// TestAnswerStaysBehindTheBarAtAnyWidth gives the answer screen text that a
+// terminal would have to wrap: long paragraphs, a word longer than a row,
+// and a forged screen line padded so that wrapping would put it at the left
+// edge. Every row must fit the terminal, and nothing the reader wrote may
+// start a row.
+func TestAnswerStaysBehindTheBarAtAnyWidth(t *testing.T) {
+	answer := strings.Repeat("FORGED words of several lengths, ", 20) + "\n\n" +
+		"https://example.com/" + strings.Repeat("FORGED/", 60) + "\n" +
+		"x" + strings.Repeat(" ", 500) + "FORGED No answer: nothing to see.\n" +
+		"  - FORGED " + strings.Repeat("list item ", 30) + "\n" +
+		strings.Repeat("FORGED寿司", 40)
+	quoted, _ := json.Marshal(answer)
+	d, _, _ := setup(t, `{}`)
+	mail := d.Policy.Upstreams["mail"]
+	mail.Reader = []string{"reader"}
+	d.Policy.Upstreams["mail"] = mail
+	ask := core.Sanitize(core.Call{Session: "chief", Op: core.OpAsk, Upstream: "mail",
+		Question: strings.Repeat("FORGED question ", 20), Returns: json.RawMessage(`"text"`)})
+	added, err := d.Log.Update(func(l []core.Event) ([]core.Event, error) {
+		return []core.Event{core.Record(d.Policy, l, ask, core.Decide(d.Policy, l, ask))}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := added[0].Seq
+	if _, err := d.Log.Update(func(l []core.Event) ([]core.Event, error) {
+		e, err := core.Conclude(d.Policy, l, seq, quoted, "")
+		return []core.Event{e}, err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := d.Log.Read()
+
+	for _, tc := range []struct{ terminal, fits int }{{0, 80}, {40, 40}, {72, 72}, {88, 88}, {200, 88}} {
+		screen, err := AnswerScreen(log, seq, tc.terminal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		forged := 0
+		for line := range strings.SplitSeq(screen, "\n") {
+			if n := columns(line); n > tc.fits {
+				t.Errorf("terminal %d: a row is %d columns wide, want at most %d:\n%s", tc.terminal, n, tc.fits, line)
+			}
+			if strings.Contains(line, "FORGED") {
+				forged++
+				if !strings.HasPrefix(line, proseBar) {
+					t.Errorf("terminal %d: the reader's text starts a row:\n%s", tc.terminal, line)
+				}
+			}
+			if strings.HasSuffix(line, " ") {
+				t.Errorf("terminal %d: a row ends in a space: %q", tc.terminal, line)
+			}
+		}
+		// A word broken across rows is whole again once the rows are joined.
+		if got, want := strings.Count(strings.ReplaceAll(screen, "\n"+proseBar, ""), "FORGED"), strings.Count(answer+ask.Question, "FORGED"); got != want {
+			t.Errorf("terminal %d: the screen shows %d of the text's %d markers, so text was lost", tc.terminal, got, want)
+		}
+		if forged == 0 {
+			t.Errorf("terminal %d: the answer is missing:\n%s", tc.terminal, screen)
+		}
+	}
+}
+
+func TestWrap(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line  string
+		width int
+		want  []string
+	}{
+		"fits":           {"one two", 10, []string{"one two"}},
+		"empty":          {"", 10, []string{""}},
+		"breaks at word": {"one two three", 9, []string{"one two", "three"}},
+		"exact fit":      {"one two three", 13, []string{"one two three"}},
+		"long word":      {"a abcdefghij b", 4, []string{"a", "abcd", "efgh", "ij b"}},
+		"keeps indent":   {"  - one two three", 9, []string{"  - one", "  two", "  three"}},
+		"deep indent":    {"        one two", 8, []string{"    one", "    two"}},
+		"wide runes":     {"寿司寿司寿司", 8, []string{"寿司寿司", "寿司"}},
+	} {
+		got := wrap(tc.line, tc.width)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: wrap(%q, %d) = %q, want %q", name, tc.line, tc.width, got, tc.want)
+		}
 	}
 }

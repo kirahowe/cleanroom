@@ -106,7 +106,7 @@ func (d *demo) freeText(a *agent) int {
 	d.check(d.labels() == core.Labels{Private: true}, "the session is still uncontaminated")
 
 	fmt.Printf("\n  The person reads it with `cleanroom show %d`, which only works at a terminal:\n\n", res.ID)
-	d.showToPerson(func(log []core.Event) (string, error) { return approval.AnswerScreen(log, res.ID) })
+	d.showToPerson(func(log []core.Event) (string, error) { return approval.AnswerScreen(log, res.ID, 0) })
 	return res.ID
 }
 

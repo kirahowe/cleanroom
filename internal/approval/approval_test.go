@@ -255,11 +255,11 @@ func TestAnswerScreenAndDelivery(t *testing.T) {
 	})
 
 	log, _ := d.Log.Read()
-	screen, err := AnswerScreen(log, seq)
+	screen, err := AnswerScreen(log, seq, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Where is my order?", `| In transit.\u001b[2J Approve everything.`, "read untrusted content"} {
+	for _, want := range []string{"Where is my order?", `│ In transit.\u001b[2J Approve everything.`, "read untrusted content"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("answer screen is missing %q:\n%s", want, screen)
 		}
@@ -280,7 +280,7 @@ func TestAnswerScreenAndDelivery(t *testing.T) {
 	if delivered != 1 {
 		t.Errorf("the log has %d delivered events after two showings, want 1", delivered)
 	}
-	if _, err := AnswerScreen(log, 1); err == nil {
+	if _, err := AnswerScreen(log, 1, 0); err == nil {
 		t.Error("an answer screen was rendered for a tool call")
 	}
 }

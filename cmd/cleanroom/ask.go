@@ -60,7 +60,7 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		if err != nil {
 			return err
 		}
-		screen, err := approval.AnswerScreen(events, res.ID)
+		screen, err := approval.AnswerScreen(events, res.ID, c.width)
 		if err != nil {
 			return err
 		}

@@ -54,6 +54,7 @@ func mainCode() int {
 	log.SetFlags(0)
 	log.SetPrefix("cleanroom: ")
 	terminal := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+	width, _, _ := term.GetSize(int(os.Stdout.Fd())) // 0 on failure, which means unknown
 	readPassword := func() (string, error) {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		return string(b), err
@@ -61,7 +62,7 @@ func mainCode() int {
 	return withSignals(foreground(os.Args[1:]), func(ctx context.Context) int {
 		return run(ctx, os.Args[1:], stdio{
 			stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
-			terminal: terminal, readPassword: readPassword,
+			terminal: terminal, width: width, readPassword: readPassword,
 		})
 	})
 }
@@ -103,6 +104,9 @@ type stdio struct {
 	// terminal reports whether a person is at the other end of both
 	// stdin and stdout.
 	terminal bool
+	// width is the terminal's width in columns, or 0 when stdout is not
+	// a terminal.
+	width int
 	// readPassword reads a line the person types without showing it.
 	readPassword func() (string, error)
 }
