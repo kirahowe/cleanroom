@@ -62,6 +62,9 @@ For a code walkthrough, start with `internal/core/doc.go` and
 
 ## Content and approval boundaries
 
+- `bin/cleanroom init` and `bin/cleanroom claude` require a terminal. `init`
+  takes a mail password from the keyboard; never ask the user to give it to
+  you. Ask the user to run both in their own terminal.
 - `bin/cleanroom show N` and `bin/cleanroom approve N` require a terminal.
   Do not bypass this check. Ask the user to run them in their terminal if
   needed. The demo prints the same screens in scenes 4 and 6 when using its

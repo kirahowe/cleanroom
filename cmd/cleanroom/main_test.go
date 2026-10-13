@@ -119,6 +119,9 @@ func fakeReader() {
 	fmt.Printf(`{"answer": %d}`+"\n", answer)
 }
 
+// testPassword is what a person "types" at the password prompt in tests.
+const testPassword = "typed-password"
+
 func cleanroom(t *testing.T, args ...string) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
@@ -132,7 +135,10 @@ func cleanroom(t *testing.T, args ...string) *exec.Cmd {
 func runCLI(t *testing.T, terminal bool, stdin string, args ...string) (stdout string, ok bool) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := run(context.Background(), args, stdio{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errOut, terminal: terminal})
+	code := run(context.Background(), args, stdio{
+		stdin: strings.NewReader(stdin), stdout: &out, stderr: &errOut, terminal: terminal,
+		readPassword: func() (string, error) { return testPassword, nil },
+	})
 	return out.String() + errOut.String(), code == 0
 }
 

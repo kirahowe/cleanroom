@@ -304,6 +304,33 @@ servers are separate Go modules with no imports from the gateway.
 Omit `ask_only` to expose read tools directly to agents. Direct reads add the
 source's labels to the calling session.
 
+## Using it on your own mail
+
+Two commands set up one IMAP mailbox and start a conversation about it:
+
+```sh
+make build
+bin/cleanroom init      # asks for the IMAP user name and password
+bin/cleanroom claude    # Claude Code with cleanroom as its only tools
+```
+
+`init` defaults to Proton Mail Bridge's address (`127.0.0.1:1143`, STARTTLS);
+`--imap-addr`, `--imap-tls` and `--imap-mailbox` change that. It logs in before
+it writes anything. On success it writes `~/.config/cleanroom/policy.jsonc`
+and, beside it, the password in a file only you can read. The policy uses
+`claude-reader`, so the mail a question touches is sent to Anthropic. `init`
+needs a terminal and takes the password only from the keyboard.
+
+`claude` starts Claude Code with no built-in tools and no MCP server but
+cleanroom. The conversation and the cleanroom session share one id. When the
+conversation ends, the command prints how to resume it with
+`cleanroom claude --resume ID`. Resuming with `claude --resume` would restore
+Claude Code's own tools and leave cleanroom out.
+
+Claude Code runs with your settings and your environment. If your settings
+restrict MCP servers (`allowedMcpServers`), they must allow `cleanroom`, or
+the conversation starts without any tools.
+
 ## Using it from a client
 
 Register cleanroom as a stdio MCP server:

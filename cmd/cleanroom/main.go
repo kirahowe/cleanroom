@@ -3,6 +3,8 @@
 //
 // Usage:
 //
+//	cleanroom init                   set up a policy for one IMAP mailbox (terminal only)
+//	cleanroom claude                 start a Claude Code conversation with only cleanroom's tools
 //	cleanroom serve [flags]          run the MCP server on stdin and stdout
 //	cleanroom reader-tools SOCKET    connect a reader to its tools (started by cleanroom)
 //
@@ -49,7 +51,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	terminal := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-	os.Exit(run(ctx, os.Args[1:], stdio{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, terminal: terminal}))
+	readPassword := func() (string, error) {
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		return string(b), err
+	}
+	os.Exit(run(ctx, os.Args[1:], stdio{
+		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
+		terminal: terminal, readPassword: readPassword,
+	}))
 }
 
 type command struct {
@@ -61,6 +70,8 @@ type command struct {
 }
 
 var commands = []command{
+	{"init", "set up a policy for one IMAP mailbox (terminal only)", initCommand},
+	{"claude", "start a Claude Code conversation whose only tools are cleanroom's (terminal only)", claudeCommand},
 	{"serve", "run the MCP server on stdin and stdout", serveCommand},
 	{"reader-tools", "connect a reader to its tools: reader-tools SOCKET (started by cleanroom)", readerToolsCommand},
 	{"proposals", "list held calls and where they stand", proposalsCommand},
@@ -79,6 +90,8 @@ type stdio struct {
 	// terminal reports whether a person is at the other end of both
 	// stdin and stdout.
 	terminal bool
+	// readPassword reads a line the person types without showing it.
+	readPassword func() (string, error)
 }
 
 type common struct {
@@ -101,6 +114,15 @@ func defaultPolicyPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "cleanroom", "policy.jsonc"), nil
+}
+
+// resolvedPolicyPath is the absolute path of the policy file, whether or
+// not the file exists.
+func (c *common) resolvedPolicyPath() (string, error) {
+	if c.policyPath == "" {
+		return defaultPolicyPath()
+	}
+	return filepath.Abs(c.policyPath)
 }
 
 // open loads the policy and opens the log. The state directory defaults to
