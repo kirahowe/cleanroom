@@ -86,7 +86,7 @@ func (d *demo) obedientReader() {
 	// Cleanroom keeps what a reader writes to stderr in a file of its
 	// own, away from the agent. The scripted reader narrates there.
 	narration, _ := os.ReadFile(filepath.Join(d.state, "children.log"))
-	for _, line := range strings.Split(string(narration), "\n") {
+	for line := range strings.SplitSeq(string(narration), "\n") {
 		if _, what, ok := strings.Cut(line, "obeying the message: "); ok {
 			fmt.Printf("  reader  (obeying the email) %s\n", oneLine(what))
 		}
@@ -207,7 +207,7 @@ func (d *demo) showToPerson(render func([]core.Event) (string, error)) {
 		d.check(false, "rendering: %v", err)
 		return
 	}
-	for _, line := range strings.Split(strings.TrimRight(screen, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(screen, "\n"), "\n") {
 		fmt.Println(strings.TrimRight("    "+line, " "))
 	}
 	fmt.Println()

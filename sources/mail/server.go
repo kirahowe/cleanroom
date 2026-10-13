@@ -37,16 +37,15 @@ type tools struct {
 func newServer(mailbox Mailbox) *mcp.Server {
 	t := &tools{mailbox: mailbox}
 	s := mcp.NewServer(&mcp.Implementation{Name: "mail-source", Version: "0.1.0"}, nil)
-	closed := false
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "search",
 		Description: "Search the mailbox. Returns message summaries, newest first.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closed},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, t.search)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "read",
 		Description: "Read one message by ID. Returns the plain text body. This may mark the message as read in the mailbox.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closed},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, t.read)
 	return s
 }

@@ -9,7 +9,6 @@ import (
 const (
 	prodID       = "-//cleanroom//calendar-source//EN"
 	maxLineBytes = 75 // RFC 5545 section 3.1: content lines are folded at 75 octets.
-	dateLayout   = "2006-01-02"
 	icsDate      = "20060102"
 	icsStamp     = "20060102T150405Z"
 )
@@ -25,8 +24,8 @@ func renderICS(events []storedEvent) string {
 	line("PRODID:" + prodID)
 	line("CALSCALE:GREGORIAN")
 	for _, e := range events {
-		start, _ := time.Parse(dateLayout, e.Date)
-		last, _ := time.Parse(dateLayout, e.EndDate)
+		start, _ := time.Parse(time.DateOnly, e.Date)
+		last, _ := time.Parse(time.DateOnly, e.EndDate)
 		line("BEGIN:VEVENT")
 		line("UID:" + e.UID)
 		line("DTSTAMP:" + e.Created.UTC().Format(icsStamp))

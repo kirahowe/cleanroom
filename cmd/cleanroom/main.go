@@ -17,8 +17,10 @@
 //	cleanroom explain N    replay the decision made about call N
 //	cleanroom repair       set aside a last log line that a crash cut off
 //
-// Every command takes --policy and --state, which default to the
-// CLEANROOM_POLICY and CLEANROOM_STATE environment variables.
+// Every command takes --policy and --state. Without --policy the policy is
+// read from ~/.config/cleanroom/policy.jsonc, and without --state the state
+// directory is .cleanroom next to the policy. Nothing is read from the
+// environment.
 package main
 
 import (
@@ -31,6 +33,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 
 	"golang.org/x/term"
@@ -93,13 +97,30 @@ type state struct {
 	log *eventlog.Log
 }
 
+// defaultPolicyPath is where the policy is looked for when --policy is not
+// given: ~/.config/cleanroom/policy.jsonc.
+func defaultPolicyPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "cleanroom", "policy.jsonc"), nil
+}
+
 // open loads the policy and opens the log. The state directory defaults to
 // .cleanroom next to the policy file.
 func (c *common) open() (*state, error) {
-	if c.policyPath == "" {
-		return nil, errors.New("no policy file: pass --policy or set CLEANROOM_POLICY")
+	path := c.policyPath
+	if path == "" {
+		var err error
+		if path, err = defaultPolicyPath(); err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(path); err != nil {
+			return nil, fmt.Errorf("no policy file: pass --policy, or put one at %s", path)
+		}
 	}
-	cfg, err := config.Load(c.policyPath)
+	cfg, err := config.Load(path)
 	if err != nil {
 		return nil, err
 	}
@@ -129,48 +150,56 @@ func (s *state) childLog() (*os.File, error) {
 	return os.OpenFile(filepath.Join(s.dir, childLogName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 }
 
-func run(ctx context.Context, args []string, sio stdio) int {
-	if len(args) == 0 {
-		usage(sio.stderr)
-		return 2
+func lookup(name string) (command, bool) {
+	i := slices.IndexFunc(commands, func(c command) bool { return c.name == name })
+	if i < 0 {
+		return command{}, false
 	}
-	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		usage(sio.stdout)
-		return 0
-	}
-	for _, cmd := range commands {
-		if cmd.name != args[0] {
-			continue
-		}
-		c := &common{stdio: sio}
-		fs := flag.NewFlagSet("cleanroom "+cmd.name, flag.ContinueOnError)
-		fs.SetOutput(sio.stderr)
-		fs.StringVar(&c.policyPath, "policy", os.Getenv("CLEANROOM_POLICY"), "path to the policy file")
-		fs.StringVar(&c.stateDir, "state", os.Getenv("CLEANROOM_STATE"), "state directory (default: .cleanroom next to the policy)")
-		runCmd := cmd.setup(fs, c)
-		if err := fs.Parse(args[1:]); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			return 2
-		}
-		if err := runCmd(ctx); err != nil {
-			fmt.Fprintf(sio.stderr, "cleanroom %s: %v\n", cmd.name, err)
-			return 1
-		}
-		return 0
-	}
-	fmt.Fprintf(sio.stderr, "cleanroom: unknown command %q\n\n", args[0])
-	usage(sio.stderr)
-	return 2
+	return commands[i], true
 }
 
-func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: cleanroom <command> [flags]")
-	fmt.Fprintln(w)
+func usageText() string {
+	var b strings.Builder
+	b.WriteString("usage: cleanroom <command> [flags]\n\n")
 	for _, cmd := range commands {
-		fmt.Fprintf(w, "  %-13s %s\n", cmd.name, cmd.summary)
+		fmt.Fprintf(&b, "  %-13s %s\n", cmd.name, cmd.summary)
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run cleanroom <command> -h for a command's flags.")
+	b.WriteString("\nRun cleanroom <command> -h for a command's flags.\n")
+	return b.String()
+}
+
+// run is the only place here that writes: it picks the command, runs it,
+// and turns the outcome into output and an exit code.
+func run(ctx context.Context, args []string, sio stdio) int {
+	if len(args) == 0 {
+		fmt.Fprint(sio.stderr, usageText())
+		return 2
+	}
+	if slices.Contains([]string{"-h", "--help", "help"}, args[0]) {
+		fmt.Fprint(sio.stdout, usageText())
+		return 0
+	}
+	cmd, ok := lookup(args[0])
+	if !ok {
+		fmt.Fprintf(sio.stderr, "cleanroom: unknown command %q\n\n%s", args[0], usageText())
+		return 2
+	}
+
+	c := &common{stdio: sio}
+	fs := flag.NewFlagSet("cleanroom "+cmd.name, flag.ContinueOnError)
+	fs.SetOutput(sio.stderr)
+	fs.StringVar(&c.policyPath, "policy", "", "path to the policy file (default: ~/.config/cleanroom/policy.jsonc)")
+	fs.StringVar(&c.stateDir, "state", "", "state directory (default: .cleanroom next to the policy)")
+	runCmd := cmd.setup(fs, c)
+	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if err := runCmd(ctx); err != nil {
+		fmt.Fprintf(sio.stderr, "cleanroom %s: %v\n", cmd.name, err)
+		return 1
+	}
+	return 0
 }

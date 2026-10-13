@@ -18,7 +18,7 @@ import (
 )
 
 func serveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
-	session := fs.String("session", os.Getenv("CLEANROOM_SESSION"),
+	session := fs.String("session", "",
 		"id of the conversation this server belongs to; reuse it when the conversation is resumed")
 	return func(ctx context.Context) error {
 		st, err := c.open()

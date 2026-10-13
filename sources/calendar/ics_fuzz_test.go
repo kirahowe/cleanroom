@@ -14,7 +14,7 @@ func unfold(t testing.TB, ics string) []string {
 		t.Fatalf("output does not end in CRLF: %q", ics)
 	}
 	var lines []string
-	for _, l := range strings.Split(strings.TrimSuffix(ics, "\r\n"), "\r\n") {
+	for l := range strings.SplitSeq(strings.TrimSuffix(ics, "\r\n"), "\r\n") {
 		if strings.ContainsAny(l, "\r\n") {
 			t.Fatalf("bare CR or LF inside a line: %q", l)
 		}

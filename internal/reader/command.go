@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -133,7 +134,7 @@ func (c *Command) mcpConfig(job Job, socket string) []byte {
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
 	}
-	args := append(append([]string(nil), c.Pipe[1:]...), socket)
+	args := append(slices.Clone(c.Pipe[1:]), socket)
 	b, _ := json.MarshalIndent(map[string]any{
 		"mcpServers": map[string]server{job.Source: {Command: c.Pipe[0], Args: args}},
 	}, "", "  ")
@@ -253,8 +254,8 @@ func ParseOutput(out []byte) ([]byte, error) {
 		return raw, nil
 	}
 	lines := bytes.Split(bytes.TrimSpace(out), []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		if raw, ok := envelope(lines[i]); ok {
+	for _, line := range slices.Backward(lines) {
+		if raw, ok := envelope(line); ok {
 			return raw, nil
 		}
 	}

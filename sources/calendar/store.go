@@ -240,20 +240,20 @@ func validateReminder(in ReminderInput) error {
 	return err
 }
 
-func validateText(field, v string, max int, required bool) error {
+func validateText(field, v string, limit int, required bool) error {
 	switch {
 	case required && strings.TrimSpace(v) == "":
 		return fmt.Errorf("%w: %s must not be empty", ErrInvalid, field)
 	case !utf8.ValidString(v):
 		return fmt.Errorf("%w: %s is not valid UTF-8", ErrInvalid, field)
-	case utf8.RuneCountInString(v) > max:
-		return fmt.Errorf("%w: %s is longer than %d characters", ErrInvalid, field, max)
+	case utf8.RuneCountInString(v) > limit:
+		return fmt.Errorf("%w: %s is longer than %d characters", ErrInvalid, field, limit)
 	}
 	return nil
 }
 
 func parseDate(field, v string) (time.Time, error) {
-	t, err := time.Parse(dateLayout, v)
+	t, err := time.Parse(time.DateOnly, v)
 	// The year is bounded so that the day after an event's last day,
 	// which the .ics file needs, still has a four-digit year.
 	if err != nil || t.Year() < 1900 || t.Year() > 9000 {
@@ -264,9 +264,7 @@ func parseDate(field, v string) (time.Time, error) {
 
 func randomID() string {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic(err) // crypto/rand does not fail on supported platforms.
-	}
+	rand.Read(b) // never fails
 	return hex.EncodeToString(b)
 }
 

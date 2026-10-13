@@ -145,7 +145,7 @@ func TestOutputFloodIsBounded(t *testing.T) {
 
 func TestCappedWriterKeepsOnlyTheLimit(t *testing.T) {
 	var c capped
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		c.Write(bytes.Repeat([]byte("x"), 1000))
 	}
 	if c.buf.Len() != typed.MaxAnswerLen+1 {
@@ -177,7 +177,7 @@ sleep 60
 		t.Errorf("Answer took %v", took)
 	}
 	time.Sleep(200 * time.Millisecond)
-	for _, field := range strings.Fields(mustRead(t, pids)) {
+	for field := range strings.FieldsSeq(mustRead(t, pids)) {
 		pid, _ := strconv.Atoi(field)
 		if pid > 1 && syscall.Kill(pid, 0) == nil {
 			t.Errorf("process %d of the reader's group is still running", pid)

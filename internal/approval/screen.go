@@ -105,7 +105,7 @@ func renderArgs(raw json.RawMessage) string {
 // span lines.
 func block(text string) string {
 	var b strings.Builder
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		fmt.Fprintf(&b, "    | %s\n", visible(line))
 	}
 	return b.String()

@@ -16,17 +16,15 @@ import (
 )
 
 func TestApproveAndDenyRace(t *testing.T) {
-	for round := 0; round < 25; round++ {
+	for round := range 25 {
 		d, mail, held := setup(t, `{"to":["x@example.com"],"body":"b"}`)
 		hash := d.proposal(t, held).Call.Hash
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		approved, denied := 0, 0
 		start := make(chan struct{})
-		for i := 0; i < 12; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for i := range 12 {
+			wg.Go(func() {
 				<-start
 				if i%2 == 0 {
 					if _, err := d.Approve(context.Background(), held, hash, "race"); err == nil {
@@ -39,7 +37,7 @@ func TestApproveAndDenyRace(t *testing.T) {
 					denied++
 					mu.Unlock()
 				}
-			}()
+			})
 		}
 		close(start)
 		wg.Wait()
@@ -109,7 +107,7 @@ func TestCrashBetweenApprovalAndEffect(t *testing.T) {
 	if st := d.proposal(t, held).Status; st != core.Approved {
 		t.Fatalf("status = %s, want approved", st)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if st, err := d.Approve(context.Background(), held, hash, "retry"); err == nil {
 			t.Errorf("a second approval after a crash = %s", st)
 		}
@@ -176,7 +174,7 @@ func TestScreenValuesCannotForgeScreenLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := map[string]int{}
-	for _, line := range strings.Split(screen, "\n") {
+	for line := range strings.SplitSeq(screen, "\n") {
 		for _, head := range []string{"Hash: ", "Why it was held:", "The session is now:", "Proposal "} {
 			if strings.HasPrefix(line, head) {
 				counts[head]++

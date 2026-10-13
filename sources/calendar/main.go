@@ -16,11 +16,7 @@ func main() {
 	log.SetOutput(os.Stderr) // stdout carries the MCP protocol
 	log.SetFlags(0)
 
-	defaultDir := "./calendar-data"
-	if env := os.Getenv("CALENDAR_DIR"); env != "" {
-		defaultDir = env
-	}
-	dir := flag.String("dir", defaultDir, "directory for calendar.ics and reminders.json (env CALENDAR_DIR)")
+	dir := flag.String("dir", "./calendar-data", "directory for calendar.ics and reminders.json")
 	flag.Parse()
 
 	store, err := newStore(*dir)

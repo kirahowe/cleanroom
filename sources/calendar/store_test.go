@@ -109,7 +109,7 @@ func TestEscaping(t *testing.T) {
 func TestFoldingKeepsUTF8Intact(t *testing.T) {
 	title := strings.Repeat("日本語のイベント", 12)
 	got := fold("SUMMARY:" + escapeText(title))
-	for _, l := range strings.Split(got, "\r\n") {
+	for l := range strings.SplitSeq(got, "\r\n") {
 		if len(l) > maxLineBytes {
 			t.Errorf("line of %d octets: %q", len(l), l)
 		}
@@ -184,13 +184,11 @@ func TestConcurrentCreates(t *testing.T) {
 	const n = 50
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := s.CreateEvent(EventInput{Title: fmt.Sprintf("event %d", i), Date: "2026-03-10"}); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

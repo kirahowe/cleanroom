@@ -241,8 +241,21 @@ func TestAnswerScreenAndDelivery(t *testing.T) {
 			t.Errorf("answer screen is missing %q:\n%s", want, screen)
 		}
 	}
-	if err := d.MarkDelivered(seq, "test"); err != nil {
-		t.Fatal(err)
+	// Showing it twice records it once.
+	for range 2 {
+		if err := d.MarkDelivered(seq, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, _ := d.Log.Read()
+	delivered := 0
+	for _, e := range after {
+		if e.Kind == core.KindDelivered {
+			delivered++
+		}
+	}
+	if delivered != 1 {
+		t.Errorf("the log has %d delivered events after two showings, want 1", delivered)
 	}
 	if _, err := AnswerScreen(log, 1); err == nil {
 		t.Error("an answer screen was rendered for a tool call")

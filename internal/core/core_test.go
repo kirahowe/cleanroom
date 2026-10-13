@@ -482,7 +482,7 @@ func TestReaderIsConfinedToItsSource(t *testing.T) {
 func TestReaderCallBudget(t *testing.T) {
 	w := newWorld(t)
 	ask, _ := w.ask("chief", "inbox", `"date"`, false)
-	for i := 0; i < MaxReaderCalls; i++ {
+	for range MaxReaderCalls {
 		_, d := w.tool(ReaderSession(ask), "inbox", "search")
 		wantVerdict(t, d, Run)
 	}

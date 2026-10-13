@@ -30,8 +30,8 @@ type noInput struct{}
 func newServer(s *Store) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "calendar-source", Version: "0.1.0"}, nil)
 
-	writes := &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)}
-	reads := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr(false)}
+	writes := &mcp.ToolAnnotations{DestructiveHint: new(false), OpenWorldHint: new(false)}
+	reads := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "create_event",
@@ -71,5 +71,3 @@ func newServer(s *Store) *mcp.Server {
 
 	return srv
 }
-
-func ptr[T any](v T) *T { return &v }

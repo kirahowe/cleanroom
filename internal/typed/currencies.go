@@ -16,7 +16,7 @@ RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SYP SZL THB
 TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD
 XOF XPF YER ZAR ZMW ZWG`
 	set := map[string]bool{}
-	for _, c := range strings.Fields(codes) {
+	for c := range strings.FieldsSeq(codes) {
 		set[c] = true
 	}
 	return set

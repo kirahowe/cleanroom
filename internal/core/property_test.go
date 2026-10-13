@@ -60,7 +60,7 @@ func TestHistoryProperties(t *testing.T) {
 		o := &oracle{exposed: map[string]bool{}, dirty: map[string]bool{}, answers: map[int]bool{}}
 
 		steps := rapid.IntRange(1, 40).Draw(rt, "steps")
-		for i := 0; i < steps; i++ {
+		for range steps {
 			before := map[string]Labels{}
 			for _, s := range []string{"a", "b", "c"} {
 				before[s] = w.labels(s)

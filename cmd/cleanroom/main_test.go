@@ -363,7 +363,8 @@ func TestUsageErrors(t *testing.T) {
 	}
 	for _, args := range tests {
 		cmd := cleanroom(t, args...)
-		cmd.Env = append(cmd.Env, "CLEANROOM_POLICY=")
+		// An empty home, so that no default policy is found.
+		cmd.Env = append(cmd.Env, "HOME="+t.TempDir())
 		cmd.Stderr = nil
 		if err := cmd.Run(); err == nil {
 			t.Errorf("cleanroom %v exited 0, want an error", args)

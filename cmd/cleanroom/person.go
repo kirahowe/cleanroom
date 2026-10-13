@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"cleanroom/internal/approval"
 	"cleanroom/internal/core"
@@ -30,44 +31,68 @@ var errNeedsTerminal = errors.New(`this command only works at a terminal, becaus
 If you are an agent: do not try to work around this. Ask the user to run it in their own terminal`)
 
 func proposalsCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
-	return func(ctx context.Context) error {
-		_, events, err := c.read()
-		if err != nil {
-			return err
-		}
-		w := tabwriter.NewWriter(c.stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "PROPOSAL\tSTATUS\tSESSION\tCALL")
-		for _, pr := range core.Proposals(events) {
-			call := pr.Call.Call
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s.%s\n", pr.Seq, pr.Status, call.Session, call.Upstream, call.Tool)
-		}
-		return w.Flush()
-	}
+	return c.print(func(_ *state, events []core.Event) (string, error) {
+		return proposalsTable(events), nil
+	})
 }
 
 func answersCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
-	return func(ctx context.Context) error {
-		_, events, err := c.read()
+	return c.print(func(_ *state, events []core.Event) (string, error) {
+		return answersTable(events), nil
+	})
+}
+
+// print returns a command that reads the log, renders it and writes the
+// result. The rendering is a function of the log alone, and this is the only
+// step that writes.
+func (c *common) print(render func(*state, []core.Event) (string, error)) func(context.Context) error {
+	return func(context.Context) error {
+		st, events, err := c.read()
 		if err != nil {
 			return err
 		}
-		shown := map[int]bool{}
-		for _, e := range events {
-			if e.Kind == core.KindDelivered {
-				shown[e.Delivered.Ref] = true
-			}
-		}
-		w := tabwriter.NewWriter(c.stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ASK\tSOURCE\tSESSION\tSHOWN")
-		for _, e := range events {
-			if e.Kind != core.KindAnswer || e.Answer.Outcome != core.OutcomeText {
-				continue
-			}
-			ask := events[e.Answer.Ref-1].Call.Call
-			fmt.Fprintf(w, "%d\t%s\t%s\t%v\n", e.Answer.Ref, ask.Upstream, ask.Session, shown[e.Answer.Ref])
-		}
-		return w.Flush()
+		text, err := render(st, events)
+		fmt.Fprint(c.stdout, text)
+		return err
 	}
+}
+
+func table(header string, rows []string) string {
+	var b strings.Builder
+	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, header)
+	for _, row := range rows {
+		fmt.Fprintln(w, row)
+	}
+	w.Flush()
+	return b.String()
+}
+
+func proposalsTable(events []core.Event) string {
+	var rows []string
+	for _, pr := range core.Proposals(events) {
+		call := pr.Call.Call
+		rows = append(rows, fmt.Sprintf("%d\t%s\t%s\t%s.%s", pr.Seq, pr.Status, call.Session, call.Upstream, call.Tool))
+	}
+	return table("PROPOSAL\tSTATUS\tSESSION\tCALL", rows)
+}
+
+func answersTable(events []core.Event) string {
+	shown := map[int]bool{}
+	for _, e := range events {
+		if e.Kind == core.KindDelivered {
+			shown[e.Delivered.Ref] = true
+		}
+	}
+	var rows []string
+	for _, e := range events {
+		if e.Kind != core.KindAnswer || e.Answer.Outcome != core.OutcomeText {
+			continue
+		}
+		ask := events[e.Answer.Ref-1].Call.Call
+		rows = append(rows, fmt.Sprintf("%d\t%s\t%s\t%v", e.Answer.Ref, ask.Upstream, ask.Session, shown[e.Answer.Ref]))
+	}
+	return table("ASK\tSOURCE\tSESSION\tSHOWN", rows)
 }
 
 func showCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
@@ -168,67 +193,69 @@ func denyCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 }
 
 func logCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
-	return func(ctx context.Context) error {
-		_, events, err := c.read()
-		if err != nil {
-			return err
+	return c.print(func(_ *state, events []core.Event) (string, error) {
+		return logTable(events, time.Local), nil
+	})
+}
+
+func logTable(events []core.Event, zone *time.Location) string {
+	var rows []string
+	for _, e := range events {
+		session, decision := "", ""
+		if e.Kind == core.KindCall {
+			session = e.Call.Call.Session
+			decision = string(e.Call.Decision.Verdict)
 		}
-		w := tabwriter.NewWriter(c.stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "EVENT\tTIME\tSESSION\tWHAT\tDECISION")
-		for _, e := range events {
-			session, decision := "", ""
-			if e.Kind == core.KindCall {
-				session = e.Call.Call.Session
-				decision = string(e.Call.Decision.Verdict)
-			}
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", e.Seq, e.Time.Local().Format("15:04:05"), session, core.Summarize(events, e.Seq), decision)
-		}
-		return w.Flush()
+		rows = append(rows, fmt.Sprintf("%d\t%s\t%s\t%s\t%s", e.Seq, e.Time.In(zone).Format("15:04:05"), session, core.Summarize(events, e.Seq), decision))
 	}
+	return table("EVENT\tTIME\tSESSION\tWHAT\tDECISION", rows)
 }
 
 // explainCommand replays a decision. Decide is a pure function of the
 // policy, the log and the call, so running it again on the log as it stood
 // gives the recorded decision again, with its reasons.
 func explainCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
-	return func(ctx context.Context) error {
+	return c.print(func(st *state, events []core.Event) (string, error) {
 		seq, err := numberArg(fs)
 		if err != nil {
-			return err
+			return "", err
 		}
-		st, events, err := c.read()
-		if err != nil {
-			return err
-		}
-		cfg := st.cfg
-		if seq > len(events) || events[seq-1].Kind != core.KindCall {
-			return fmt.Errorf("event %d is not a call", seq)
-		}
-		recorded := events[seq-1].Call
-		replayed := core.Decide(cfg.Policy, events[:seq-1], recorded.Call)
+		return explanation(st.cfg.Policy, events, seq)
+	})
+}
 
-		fmt.Fprintf(c.stdout, "Event %d: session %q %s\n", seq, recorded.Call.Session, core.Summarize(events, seq))
-		fmt.Fprintf(c.stdout, "The session carried: %s\n", recorded.Held)
-		fmt.Fprintf(c.stdout, "Decision: %s", replayed.Verdict)
-		if replayed.Class != "" {
-			fmt.Fprintf(c.stdout, " (class %s)", replayed.Class)
-		}
-		fmt.Fprintln(c.stdout)
-		for _, r := range replayed.Reasons {
-			fmt.Fprintf(c.stdout, "  - %s\n", r.Text)
-			for _, cited := range r.Events {
-				fmt.Fprintf(c.stdout, "      event %d: %s\n", cited, core.Summarize(events, cited))
-			}
-		}
-		if replayed.Gains != (core.Labels{}) {
-			fmt.Fprintf(c.stdout, "The session takes on: %s\n", replayed.Gains)
-		}
-		if replayed.Equal(recorded.Decision) {
-			fmt.Fprintln(c.stdout, "Replayed from the log just now. It matches the decision recorded at the time.")
-			return nil
-		}
-		return fmt.Errorf("the replayed decision differs from the recorded one (%s): the policy has changed since", recorded.Decision.Verdict)
+// explanation replays the decision about the call at seq and describes it.
+// It returns the description with an error when the replay does not match
+// what was recorded.
+func explanation(policy core.Policy, events []core.Event, seq int) (string, error) {
+	if seq > len(events) || events[seq-1].Kind != core.KindCall {
+		return "", fmt.Errorf("event %d is not a call", seq)
 	}
+	recorded := events[seq-1].Call
+	replayed := core.Decide(policy, events[:seq-1], recorded.Call)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Event %d: session %q %s\n", seq, recorded.Call.Session, core.Summarize(events, seq))
+	fmt.Fprintf(&b, "The session carried: %s\n", recorded.Held)
+	fmt.Fprintf(&b, "Decision: %s", replayed.Verdict)
+	if replayed.Class != "" {
+		fmt.Fprintf(&b, " (class %s)", replayed.Class)
+	}
+	fmt.Fprintln(&b)
+	for _, r := range replayed.Reasons {
+		fmt.Fprintf(&b, "  - %s\n", r.Text)
+		for _, cited := range r.Events {
+			fmt.Fprintf(&b, "      event %d: %s\n", cited, core.Summarize(events, cited))
+		}
+	}
+	if replayed.Gains != (core.Labels{}) {
+		fmt.Fprintf(&b, "The session takes on: %s\n", replayed.Gains)
+	}
+	if !replayed.Equal(recorded.Decision) {
+		return b.String(), fmt.Errorf("the replayed decision differs from the recorded one (%s): the policy has changed since", recorded.Decision.Verdict)
+	}
+	b.WriteString("Replayed from the log just now. It matches the decision recorded at the time.\n")
+	return b.String(), nil
 }
 
 // repairCommand deals with the one kind of log damage a crash can cause: a

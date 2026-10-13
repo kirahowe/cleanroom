@@ -354,10 +354,12 @@ func ReaderSpent(log []Event, session string) bool {
 	used := 0
 	for _, e := range log {
 		if e.Kind == KindCall && e.Call.Call.Session == session {
-			used++
+			if used++; used >= MaxReaderCalls {
+				return true
+			}
 		}
 	}
-	return used >= MaxReaderCalls
+	return false
 }
 
 // readerMayUse reports whether a reader may call an egress tool of its

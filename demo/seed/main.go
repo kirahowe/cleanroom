@@ -17,7 +17,7 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -44,7 +44,7 @@ func main() {
 	if err != nil || len(files) == 0 {
 		log.Fatalf("no .eml files in %s", *dir)
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	for _, file := range files {
 		if err := send(*smtp, file); err != nil {
 			log.Fatalf("%s: %v", file, err)

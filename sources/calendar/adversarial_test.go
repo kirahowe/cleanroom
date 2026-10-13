@@ -120,11 +120,9 @@ func TestConcurrentWritersInOneStore(t *testing.T) {
 	s := newTestStore(t)
 	const writers, each = 8, 15
 	var wg sync.WaitGroup
-	for w := 0; w < writers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < each; i++ {
+	for range writers {
+		wg.Go(func() {
+			for range each {
 				if _, err := s.CreateEvent(EventInput{Title: "e", Date: "2026-03-10"}); err != nil {
 					t.Error(err)
 				}
@@ -135,7 +133,7 @@ func TestConcurrentWritersInOneStore(t *testing.T) {
 					t.Error("a reader saw a partial calendar.ics")
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	events, _ := s.ListEvents()

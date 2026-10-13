@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -51,10 +52,8 @@ func (r readerTools) Call(ctx context.Context, tool string, args json.RawMessage
 		return nil, err
 	}
 	var hint core.Class
-	for _, t := range all {
-		if t.Name == tool {
-			hint = upstream.Hint(t)
-		}
+	if i := slices.IndexFunc(all, func(t *mcp.Tool) bool { return t.Name == tool }); i >= 0 {
+		hint = upstream.Hint(all[i])
 	}
 	return r.g.callTool(ctx, core.Call{
 		Session: r.session, Op: core.OpTool,

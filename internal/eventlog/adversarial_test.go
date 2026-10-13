@@ -33,7 +33,7 @@ func appendRounds(dir, worker string, rounds int) error {
 	if err != nil {
 		return err
 	}
-	for i := 0; i < rounds; i++ {
+	for i := range rounds {
 		_, err := l.Update(func(log []core.Event) ([]core.Event, error) {
 			e := call(worker)
 			e.Call.Call.Question = strconv.Itoa(len(log))
@@ -70,25 +70,21 @@ func TestManyProcessesAndGoroutines(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, processes+goroutines)
-	for p := 0; p < processes; p++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for p := range processes {
+		wg.Go(func() {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
 			cmd.Env = append(os.Environ(), helperDirEnv+"="+dir, helperNameEnv+"=p"+strconv.Itoa(p), helperRoundsEnv+"="+strconv.Itoa(rounds))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				errs <- fmt.Errorf("process %d: %v\n%s", p, err, out)
 			}
-		}()
+		})
 	}
-	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for g := range goroutines {
+		wg.Go(func() {
 			if err := appendRounds(dir, "g"+strconv.Itoa(g), rounds); err != nil {
 				errs <- fmt.Errorf("goroutine %d: %v", g, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

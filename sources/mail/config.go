@@ -7,21 +7,16 @@ import (
 	"strings"
 )
 
-// config is the server's startup configuration. Nothing in it comes from
-// tool arguments.
+// config is the server's startup configuration. All of it comes from the
+// command line, which the policy file writes. Nothing comes from tool
+// arguments or from the environment.
 type config struct {
 	mailpitURL *url.URL
 }
 
-// parseConfig reads flags from args, falling back to environment variables
-// looked up through getenv.
-func parseConfig(args []string, getenv func(string) string) (config, error) {
-	def := "http://127.0.0.1:8025"
-	if v := getenv("MAILPIT_URL"); v != "" {
-		def = v
-	}
+func parseConfig(args []string) (config, error) {
 	fs := flag.NewFlagSet("mail-source", flag.ContinueOnError)
-	mailpitURL := fs.String("mailpit-url", def, "Mailpit HTTP API base URL (env MAILPIT_URL)")
+	mailpitURL := fs.String("mailpit-url", "http://127.0.0.1:8025", "Mailpit HTTP API base URL")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}

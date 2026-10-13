@@ -14,7 +14,7 @@ import (
 
 func main() {
 	log.SetOutput(os.Stderr)
-	cfg, err := parseConfig(os.Args[1:], os.Getenv)
+	cfg, err := parseConfig(os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -258,16 +258,10 @@ func check(spec Spec, v any) (string, bool) {
 
 	case Choice:
 		s, ok := v.(string)
-		if !ok {
+		if !ok || !slices.Contains(spec.Choices, s) {
 			return "", false
 		}
-		for _, c := range spec.Choices {
-			if s == c {
-				// Emit the caller's own string, not the reader's.
-				return quote(c), true
-			}
-		}
-		return "", false
+		return quote(s), true
 
 	case Record:
 		m, ok := v.(map[string]any)

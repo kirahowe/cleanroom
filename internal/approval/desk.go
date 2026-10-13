@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"cleanroom/internal/core"
 	"cleanroom/internal/eventlog"
@@ -75,11 +76,17 @@ func (d *Desk) resolve(seq int, hash string, approve bool, via string) (core.Pro
 }
 
 // MarkDelivered records that the answer to the ask at seq was shown to the
-// person.
+// person. Only the first showing is recorded: the log says that the person
+// has seen an answer, and looking again adds nothing to that.
 func (d *Desk) MarkDelivered(seq int, via string) error {
 	_, err := d.Log.Update(func(log []core.Event) ([]core.Event, error) {
 		if _, ok := core.AnswerTo(log, seq); !ok {
 			return nil, fmt.Errorf("ask %d has no answer", seq)
+		}
+		if slices.ContainsFunc(log, func(e core.Event) bool {
+			return e.Kind == core.KindDelivered && e.Delivered.Ref == seq
+		}) {
+			return nil, nil
 		}
 		return []core.Event{{Kind: core.KindDelivered, Delivered: &core.Delivered{Ref: seq, Via: via}}}, nil
 	})
