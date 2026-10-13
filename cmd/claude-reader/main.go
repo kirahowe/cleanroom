@@ -6,6 +6,9 @@
 // The session uses the Claude Code login of the user who runs it. What the
 // reader reads from the source is sent to Anthropic.
 //
+// The user's Claude Code settings apply to the session. If they restrict
+// MCP servers, the user has to allow the one named "cleanroom".
+//
 // Like any reader it is untrusted. The flags in claudeArgs take away the
 // session's other tools, but the process is not sandboxed. See "Limits" in
 // the README.
@@ -23,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -37,7 +41,7 @@ func main() {
 		configPath = flag.String("mcp-config", "", "MCP config file naming the source's server")
 		question   = flag.String("question", "", "the question to answer")
 		returns    = flag.String("returns", `"text"`, "the wanted type, as JSON")
-		model      = flag.String("model", "sonnet", "Claude Code model alias or name")
+		model      = flag.String("model", "opus", "Claude Code model alias or name")
 		claude     = flag.String("claude", "claude", "the Claude Code executable")
 	)
 	flag.Parse()
@@ -64,7 +68,7 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	if err != nil {
 		return nil, "", err
 	}
-	source, err := sourceName(configPath)
+	source, server, err := sourceServer(configPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -75,19 +79,34 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 
 	// Claude Code reads instruction files from its working directory and
 	// the directories above it. An empty directory gives it none.
-	dir, err := os.MkdirTemp("", "claude-reader-")
+	tmp, err := os.MkdirTemp("", "claude-reader-")
 	if err != nil {
 		return nil, "", err
 	}
-	defer os.RemoveAll(dir)
+	defer os.RemoveAll(tmp)
+	dir := filepath.Join(tmp, "cwd")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return nil, "", err
+	}
+	renamed, err := json.Marshal(map[string]any{"mcpServers": map[string]json.RawMessage{serverName: server}})
+	if err != nil {
+		return nil, "", err
+	}
+	sessionConfig := filepath.Join(tmp, "mcp.json")
+	if err := os.WriteFile(sessionConfig, renamed, 0o600); err != nil {
+		return nil, "", err
+	}
 
 	system := systemPrompt(source, now.Format("Monday, January 2, 2006"))
-	cmd := exec.CommandContext(ctx, claude, claudeArgs(model, configPath, source, system, string(schemaJSON))...)
+	cmd := exec.CommandContext(ctx, claude, claudeArgs(model, sessionConfig, system, string(schemaJSON))...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(question)
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
+	if strings.Contains(stderr.String(), "MCP server blocked") {
+		return nil, "", errors.New(blockedHelp)
+	}
 
 	result, parseErr := parseResult(stdout.Bytes())
 	switch {
@@ -104,24 +123,31 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	return line, report, err
 }
 
-// sourceName returns the name of the one server in the config file. Claude
-// Code names a server's tools after it.
-func sourceName(configPath string) (string, error) {
+// blockedHelp is what to do when Claude Code's settings keep the session
+// from loading the source's tools.
+const blockedHelp = `Claude Code did not load the reader's tools, because its settings restrict MCP servers.
+To allow them, add this entry to "allowedMcpServers" in Claude Code's settings.json:
+
+    { "serverName": "` + serverName + `" }`
+
+// sourceServer returns the one server in the config file cleanroom wrote:
+// the source's name, and how to start its server.
+func sourceServer(configPath string) (source string, server json.RawMessage, err error) {
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var config struct {
 		MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
-		return "", fmt.Errorf("%s: %w", configPath, err)
+		return "", nil, fmt.Errorf("%s: %w", configPath, err)
 	}
 	names := slices.Collect(maps.Keys(config.MCPServers))
 	if len(names) != 1 {
-		return "", fmt.Errorf("%s names %d MCP servers, want one", configPath, len(names))
+		return "", nil, fmt.Errorf("%s names %d MCP servers, want one", configPath, len(names))
 	}
-	return names[0], nil
+	return names[0], config.MCPServers[names[0]], nil
 }
 
 // result is the part of Claude Code's --output-format json that is used.

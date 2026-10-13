@@ -85,6 +85,11 @@ func valueSchema(spec typed.Spec) schema {
 	return schema{"type": "string", "description": fmt.Sprintf("A short plain-text answer, at most %d characters.", typed.MaxTextRunes)}
 }
 
+// serverName is the name the source's MCP server has inside the session,
+// whatever the source is called. A user whose Claude Code settings restrict
+// MCP servers allows this one name, once, for every source.
+const serverName = "cleanroom"
+
 // claudeArgs is the command line of a headless Claude Code session that can
 // do nothing but call the source's tools:
 //
@@ -92,24 +97,25 @@ func valueSchema(spec typed.Spec) schema {
 //     access and web access.
 //   - --strict-mcp-config with --mcp-config loads only the server cleanroom
 //     wrote, not the user's own MCP servers.
-//   - --setting-sources "" skips the user's and the project's settings, and
-//     with them their hooks and permissions.
 //   - --permission-prompts none denies whatever is not allowed outright.
 //   - --no-session-persistence keeps the transcript, which holds what the
 //     reader read, off the disk.
 //
+// The user's Claude Code settings stay in force. Their hooks run in the
+// session, and if they restrict MCP servers, the session gets the source's
+// tools only once they allow serverName.
+//
 // The question is not here. It goes to the session on stdin, so that a
 // question starting with a dash cannot be taken for an option.
-func claudeArgs(model, mcpConfig, source, system, schemaJSON string) []string {
+func claudeArgs(model, mcpConfig, system, schemaJSON string) []string {
 	return []string{
 		"--print",
 		"--model", model,
 		"--system-prompt", system,
 		"--tools", "",
 		"--strict-mcp-config", "--mcp-config", mcpConfig,
-		"--allowedTools", "mcp__" + source,
+		"--allowedTools", "mcp__" + serverName,
 		"--permission-prompts", "none",
-		"--setting-sources", "",
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--output-format", "json",

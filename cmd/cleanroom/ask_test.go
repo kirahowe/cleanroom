@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -60,5 +62,30 @@ func TestReturnsSpec(t *testing.T) {
 		if got := string(returnsSpec(in)); got != want {
 			t.Errorf("returnsSpec(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// A reader that fails gives no answer. At a terminal the person is told
+// where to look and what the usual cause is.
+func TestAskExplainsAFailedReader(t *testing.T) {
+	policy := writePolicy(t, fmt.Sprintf(`{
+		"upstreams": {
+			"calendar": {
+				"command": [%q],
+				"env": {"CLEANROOM_TEST_AS": "upstream"},
+				"labels": [],
+				"reader": ["false"],
+				"tools": {"list_events": {"class": "read"}},
+			},
+		},
+	}`, os.Args[0]))
+	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	if !ok || !strings.Contains(out, "No answer") || !strings.Contains(out, `{ "serverName": "cleanroom" }`) || !strings.Contains(out, "children.log") {
+		t.Errorf("got %v:\n%s", ok, out)
+	}
+	// An agent is told only that there is no answer.
+	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	if strings.Contains(out, "serverName") || !strings.Contains(out, `"status": "no_answer"`) {
+		t.Errorf("without a terminal:\n%s", out)
 	}
 }

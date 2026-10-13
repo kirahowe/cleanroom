@@ -22,6 +22,8 @@ func fakeClaude(t *testing.T, dir, output string, exit int) string {
 printf '%s\n' "$@" > "` + dir + `/args"
 cat > "` + dir + `/stdin"
 pwd > "` + dir + `/cwd"
+while [ $# -gt 0 ]; do [ "$1" = --mcp-config ] && cat "$2" > "` + dir + `/mcp-config"; shift; done
+cat "` + dir + `/stderr" >&2
 printf '%s' "$CLAUDE_CONFIG_DIR" > "` + dir + `/config-dir"
 ls -A | wc -l | tr -d ' ' > "` + dir + `/cwd-entries"
 cat "` + dir + `/output"
@@ -30,8 +32,10 @@ exit ` + strconv.Itoa(exit) + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "output"), []byte(output), 0o600); err != nil {
-		t.Fatal(err)
+	for name, content := range map[string]string{"output": output, "stderr": ""} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return path
 }
@@ -79,6 +83,12 @@ func TestRun(t *testing.T) {
 	}
 	if report != "success, 4 turns, 2.5s, $0.0123" {
 		t.Errorf("report = %q", report)
+	}
+
+	// The session is given the source's server under one fixed name, so
+	// a single entry in the user's settings allows it for every source.
+	if got := recorded(t, dir, "mcp-config"); got != `{"mcpServers":{"cleanroom":{"command":"cleanroom","args":["reader-tools","/tmp/x.sock"]}}}` {
+		t.Errorf("session MCP config = %s", got)
 	}
 
 	// The question travels on stdin, where a leading dash means nothing.
@@ -140,14 +150,13 @@ func TestRunRejectsBadInput(t *testing.T) {
 // Dropping one of them gives a reader a shell, the user's other MCP
 // servers, or the user's hooks.
 func TestClaudeArgsLockTheSessionDown(t *testing.T) {
-	args := claudeArgs("sonnet", "/tmp/mcp.json", "mail", "SYSTEM", "{}")
+	args := claudeArgs("sonnet", "/tmp/mcp.json", "SYSTEM", "{}")
 	for _, want := range [][]string{
 		{"--print"},
 		{"--tools", ""},
 		{"--strict-mcp-config", "--mcp-config", "/tmp/mcp.json"},
-		{"--allowedTools", "mcp__mail"},
+		{"--allowedTools", "mcp__cleanroom"},
 		{"--permission-prompts", "none"},
-		{"--setting-sources", ""},
 		{"--disable-slash-commands"},
 		{"--no-session-persistence"},
 		{"--system-prompt", "SYSTEM"},
@@ -155,6 +164,10 @@ func TestClaudeArgsLockTheSessionDown(t *testing.T) {
 		if !containsRun(args, want) {
 			t.Errorf("args lack %q: %q", want, args)
 		}
+	}
+	// The user's settings are theirs to keep in force.
+	if slices.Contains(args, "--setting-sources") || slices.Contains(args, "--bare") || slices.Contains(args, "--safe-mode") {
+		t.Errorf("args skip the user's settings: %q", args)
 	}
 	for _, arg := range args {
 		if strings.Contains(arg, "dangerously") || arg == "bypassPermissions" {
@@ -223,5 +236,19 @@ func TestSystemPrompt(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
+	}
+}
+
+// When the user's settings keep the tools from loading, the reader says
+// what to change. It does not answer from a session that could read nothing.
+func TestRunWhenTheToolsAreBlocked(t *testing.T) {
+	dir := t.TempDir()
+	claude := fakeClaude(t, dir, `{"subtype":"success","structured_output":{"answer":null}}`, 0)
+	if err := os.WriteFile(filepath.Join(dir, "stderr"), []byte("Warning: MCP server blocked by enterprise policy: cleanroom\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	answer, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now())
+	if err == nil || !strings.Contains(err.Error(), `{ "serverName": "cleanroom" }`) || !strings.Contains(err.Error(), "allowedMcpServers") {
+		t.Errorf("got %s, %v", answer, err)
 	}
 }

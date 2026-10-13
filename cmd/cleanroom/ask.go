@@ -65,13 +65,30 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		}
 		fmt.Fprint(c.stdout, "\n"+screen)
 		fmt.Fprintf(c.stdout, "\nWhat the reader did: cleanroom log\n")
-		if ans, ok := core.AnswerTo(events, res.ID); ok && ans.Outcome == core.OutcomeText {
+		ans, ok := core.AnswerTo(events, res.ID)
+		if ok && ans.Outcome == core.OutcomeNone && strings.HasPrefix(ans.Detail, "the reader failed") {
+			fmt.Fprint(c.stdout, readerFailedHelp)
+		}
+		if ok && ans.Outcome == core.OutcomeText {
 			desk := &approval.Desk{Policy: g.Policy, Log: g.Log}
 			return desk.MarkDelivered(res.ID, "cli")
 		}
 		return nil
 	}
 }
+
+// readerFailedHelp names the usual reason a reader backed by Claude Code
+// fails on a new setup.
+const readerFailedHelp = `
+The reader did not finish. Its own messages are in children.log, in the state
+directory beside the policy.
+
+If your Claude Code settings restrict MCP servers, the reader cannot load its
+tools until you allow them. Add this entry to "allowedMcpServers" in Claude
+Code's settings.json:
+
+    { "serverName": "cleanroom" }
+`
 
 // returnsSpec turns the --returns flag into the JSON the ask takes. A bare
 // word such as date is a type name. Anything that starts like JSON is

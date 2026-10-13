@@ -176,11 +176,12 @@ user's own login and prints the session's answer:
 ```
 
 It starts the session with no built-in tools (`--tools ""`), only the MCP
-server cleanroom supplies (`--strict-mcp-config`), no user or project settings
-and so no hooks (`--setting-sources ""`), its own system prompt, an empty
-working directory and no saved transcript. The answer is requested as
+server cleanroom supplies (`--strict-mcp-config`), its own system prompt, an
+empty working directory and no saved transcript. Your Claude Code settings
+stay in force, so your hooks run in the session. If they restrict MCP
+servers, see "Allow the reader's tools" below. The answer is requested as
 structured output that matches the wanted type. `--model` selects the model
-and defaults to `sonnet`.
+and defaults to `opus`.
 
 These flags restrict the session; they are not a sandbox. The reader process
 runs as the user, and the restriction is only as good as Claude Code's
@@ -310,15 +311,21 @@ Two commands set up one IMAP mailbox and ask it a question:
 
 ```sh
 make build
-bin/cleanroom init      # asks for the IMAP user name and password
+bin/cleanroom init      # asks for consent, then IMAP credentials
 bin/cleanroom ask "When is my next dentist appointment?"
 ```
+
+`init` first explains that the reader sends email headers and message text
+to Anthropic, including for typed questions. Enter `y` or `yes` to allow
+this for questions using the setup. Any other response cancels before
+credentials are requested, files are written or the mailbox is contacted.
+Once accepted, setup continues and later questions do not prompt again.
 
 `init` defaults to Proton Mail Bridge's address (`127.0.0.1:1143`, STARTTLS);
 `--imap-addr` and `--imap-tls` change that. It reads the mailbox that holds
 all mail, so archived and filed messages are found; `--imap-mailbox` names
-another. It logs in before it writes anything and prints which mailbox it
-opened. On success it writes `~/.config/cleanroom/policy.jsonc`
+another. It checks the login before writing the policy and prints which
+mailbox it opened. On success it writes `~/.config/cleanroom/policy.jsonc`
 and, beside it, the password in a file only you can read. `init` needs a
 terminal and takes the password only from the keyboard.
 
@@ -334,6 +341,24 @@ Without a terminal it prints what the ask tool returns, so a program or an
 agent that runs it gets a checked value, and for free text only an id.
 `cleanroom log` lists what the reader did, without content.
 
+### Allow the reader's tools
+
+The reader's Claude Code session loads one MCP server, named `cleanroom`.
+Nothing needs changing unless your Claude Code settings set
+`allowedMcpServers`. If they do, add an entry for it in your `settings.json`
+(`~/.claude/settings.json`, or the directory `CLAUDE_CONFIG_DIR` names):
+
+```json
+"allowedMcpServers": [
+  { "serverName": "cleanroom" }
+]
+```
+
+If the list also has `serverCommand` entries, Claude Code matches local
+servers by command and ignores the name. The reader's server command changes
+with every question, so that case needs the name-only form. Until the entry
+is there, `ask` reports no answer and says why.
+
 ### A conversation in Claude Code
 
 ```sh
@@ -346,9 +371,8 @@ conversation ends, the command prints how to resume it with
 `cleanroom claude --resume ID`. Resuming with `claude --resume` would restore
 Claude Code's own tools and leave cleanroom out.
 
-Claude Code runs with your settings and your environment. If your settings
-restrict MCP servers (`allowedMcpServers`), they must allow `cleanroom`, or
-the conversation starts without any tools.
+Claude Code runs with your settings and your environment. The same
+`cleanroom` entry in `allowedMcpServers` covers this conversation.
 
 ## Using it from a client
 
