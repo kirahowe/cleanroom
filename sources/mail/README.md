@@ -90,7 +90,7 @@ A cleanroom policy entry for the same account:
   "command": ["/path/to/bin/mail-source",
     "--imap-addr", "127.0.0.1:1143", "--imap-tls", "starttls",
     "--imap-user", "you@example.com",
-    "--imap-password-file", "/Users/you/.config/cleanroom/imap-password"],
+    "--imap-password-file", "/path/to/imap-password"],
   "labels": ["contaminated", "private"],
   "ask_only": true,
   "reader": ["..."],
