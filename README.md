@@ -15,16 +15,39 @@ access to private data, a way to send data out, and exposure to content that an
 attacker can use to inject instructions. Removing any one of these can also
 remove capabilities the agent needs to do its job.
 
-Traditional access controls usually base authority on identity and roles.
-Those can change, but they remain properties the system can check at each
-request. For an agent, authority also needs to depend on the current session.
-The same agent, with the same credentials, may need different permissions
-after reading an untrusted email.
+A coding agent with shell access may already have all three. Connecting it
+to an inbox adds a particularly accessible injection path: anyone who can
+send you mail can put content in front of it. Dependencies, fetched pages
+and issue comments can also carry injections; mail gives an attacker a
+direct route addressed to you.
 
-Cleanroom makes that history part of access control. It tracks what each
-session has read and written, and uses that state to decide whether a tool
-call can run, needs approval, or must be refused. Typed queries let the agent
-use information from untrusted sources without reading their text.
+Cleanroom provides two distinct protections:
+
+- **Quarantine:** a separate reader sees the source text. The agent receives
+  a checked value such as `{"amount":"890.55","currency":"CAD"}`, or an id
+  for free text stored for the user. This is useful even when the agent has
+  a shell: querying mail through this path does not introduce its free text
+  into the agent's context. It does not protect other input paths or stop
+  an agent from accessing mail outside the gateway.
+- **Enforcement after contamination:** cleanroom tracks what each session
+  has read and written. Once a session receives untrusted text, actions
+  require approval; egress also requires approval when the session holds
+  private data. These rules cover the whole session only when cleanroom is
+  its only source of tools and the agent cannot bypass the gateway or its
+  approval boundary. Mail, calendar and document agents can operate with
+  that restricted tool surface, without a shell.
+
+In an ordinary coding session, cleanroom is a quarantine layer. It does not
+make the session safe as a whole. If an agent with shell access opts into
+free text through `accept_contamination: true`, cleanroom still enforces
+holds on calls through the gateway, but cannot constrain what the agent
+does through its shell. Routine opt-in in that setting leaves subsequent
+behaviour dependent on the model respecting the boundary.
+
+Typed answers also have a narrower guarantee than correctness. An attacker
+can supply a valid but false date and influence an action taken from it.
+Quarantine limits what reaches the agent; it does not establish that the
+source or the reader is telling the truth.
 
 ## Try it in five minutes
 
@@ -203,6 +226,10 @@ Another headless agent or a program that calls a model API can use the same
 interface, provided it has no other tools.
 
 ## What the gateway enforces
+
+These rules govern calls routed through cleanroom. They cover all of an
+agent's tool calls only when it has no tools or access that bypass the gateway
+(see [Limits](#limits)).
 
 Cleanroom tracks two labels per session: `contaminated` for exposure to
 untrusted content, and `private` for access to private data. Labels are added
@@ -394,9 +421,9 @@ The session runs `ask` without a terminal, so it receives checked values and
 never mail text; free text is stored for you to read with `cleanroom show`.
 This path has no `accept_contamination`.
 
-The skill is guidance and not enforcement. A session with a shell can still
-reach your mail in other ways if something else steers it there. What this
-gives you is that asking about mail no longer puts mail text in the session.
+The skill guides the session to use the quarantine path described above.
+It does not restrict the shell or provide enforcement across the session;
+the agent can still reach mail or perform actions outside cleanroom.
 
 ### A conversation in Claude Code
 
@@ -434,8 +461,8 @@ Configuration comes from flags and the policy file. The default policy path is
 policy unless `--state` overrides it. The tools are `ask`, `read_answer`,
 `status`, and proxied tools named `<upstream>_<tool>`.
 
-Cleanroom must be the session's only source of tools. Disable the client's
-built-in tools and other MCP servers. For
+For enforcement across the session, cleanroom must be its only source of
+tools. Disable the client's built-in tools and other MCP servers. For
 [Claude Code](https://code.claude.com/docs/en/cli-reference), use
 `--tools "" --strict-mcp-config --mcp-config examples/mcp.json`. The repository
 omits a root `.mcp.json` to avoid automatic loading alongside unrestricted
