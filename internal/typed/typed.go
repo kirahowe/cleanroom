@@ -78,21 +78,22 @@ func (s *Spec) UnmarshalJSON(raw []byte) error {
 }
 
 // ParseSpec reads and validates the spec from a tool argument. Anything it
-// does not recognise is an error.
+// does not recognise is an error. The error never repeats part of raw: it
+// becomes the reason a call was refused, which is shown to others.
 func ParseSpec(raw json.RawMessage) (Spec, error) {
 	var s Spec
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return Spec{}, fmt.Errorf("returns must be a type name or a {type, ...} object: %w", err)
+		return Spec{}, errors.New("returns must be a type name or a {type, ...} object")
 	}
 	return validate(s, true)
 }
 
 func validate(s Spec, topLevel bool) (Spec, error) {
 	if s.Type != Choice && s.Choices != nil {
-		return Spec{}, fmt.Errorf("type %q does not take choices", s.Type)
+		return Spec{}, errors.New("only a choice takes choices")
 	}
 	if s.Type != Record && s.Fields != nil {
-		return Spec{}, fmt.Errorf("type %q does not take fields", s.Type)
+		return Spec{}, errors.New("only a record takes fields")
 	}
 	switch s.Type {
 	case Date, DateTime, Number, Money, Boolean:
@@ -123,15 +124,15 @@ func validate(s Spec, topLevel bool) (Spec, error) {
 		}
 		for name, f := range s.Fields {
 			if !fieldName.MatchString(name) {
-				return Spec{}, fmt.Errorf("field name %q must match %s", name, fieldName)
+				return Spec{}, fmt.Errorf("a field name must match %s", fieldName)
 			}
 			if _, err := validate(f, false); err != nil {
-				return Spec{}, fmt.Errorf("field %q: %w", name, err)
+				return Spec{}, fmt.Errorf("a record field is not valid: %w", err)
 			}
 		}
 		return s, nil
 	default:
-		return Spec{}, fmt.Errorf("unknown type %q", s.Type)
+		return Spec{}, errors.New("unknown type: use date, datetime, number, money, boolean, text, choice or record")
 	}
 }
 

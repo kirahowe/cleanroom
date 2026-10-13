@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -97,10 +98,41 @@ func (g *Gateway) Server(ctx context.Context) (*mcp.Server, error) {
 	g.addStatus(s)
 	g.addAsk(s)
 	g.addReadAnswer(s)
-	if err := g.addUpstreamTools(ctx, s); err != nil {
+	offered, err := g.addUpstreamTools(ctx, s)
+	if err != nil {
 		return nil, err
 	}
+	s.AddReceivingMiddleware(g.recordUnoffered(offered))
 	return s, nil
+}
+
+// recordUnoffered catches a call to a tool this server does not offer and
+// sends it through Decide like any other call, which refuses it and records
+// the attempt. Left to the MCP layer, such a call is rejected as unknown
+// and leaves nothing in the log, and an agent reaching for a tool it was
+// not given is something the person may want to see.
+func (g *Gateway) recordUnoffered(offered map[string]string) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			p, ok := req.GetParams().(*mcp.CallToolParamsRaw)
+			if method != "tools/call" || !ok || offered[p.Name] != "" {
+				return next(ctx, method, req)
+			}
+			// The public name is <upstream>_<tool>. If it starts with
+			// an upstream's name, record the call against that
+			// upstream. Otherwise the name is recorded whole.
+			upstream, tool := "", p.Name
+			for name := range g.Policy.Upstreams {
+				if rest, ok := strings.CutPrefix(p.Name, name+"_"); ok && len(name) > len(upstream) {
+					upstream, tool = name, rest
+				}
+			}
+			return g.callTool(ctx, core.Call{
+				Session: g.Session, Op: core.OpTool,
+				Upstream: upstream, Tool: tool, Args: p.Arguments,
+			}), nil
+		}
+	}
 }
 
 // textResult is a tool result that says the same thing twice: as text for

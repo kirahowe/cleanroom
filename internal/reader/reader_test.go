@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -154,6 +155,11 @@ func TestToolsAreServedOnTheSocket(t *testing.T) {
 			t.Fatalf("connection %d: search = %+v, %v", i, res, err)
 		}
 		if i == 0 {
+			// A tool that was not offered still reaches Tools.Call,
+			// where the gateway refuses and records it.
+			if _, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "send", Arguments: map[string]any{"to": "eve@evil.example"}}); err != nil {
+				t.Fatalf("calling a tool that was not offered: %v", err)
+			}
 			cs.Close()
 			continue
 		}
@@ -165,8 +171,9 @@ func TestToolsAreServedOnTheSocket(t *testing.T) {
 			t.Error("a call on a connection left open after the job ended still worked")
 		}
 	}
-	if got := len(tools.calls); got != 2 {
-		t.Errorf("%d calls reached the tools, want 2: %v", got, tools.calls)
+	want := []string{`search {"query":"x"}`, `send {"to":"eve@evil.example"}`, `search {"query":"x"}`}
+	if !slices.Equal(tools.calls, want) {
+		t.Errorf("calls that reached the tools: %q, want %q", tools.calls, want)
 	}
 }
 

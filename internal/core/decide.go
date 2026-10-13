@@ -45,6 +45,12 @@ func (d Decision) Equal(o Decision) bool {
 
 // Reason is one sentence of explanation, with the Seq of each event that
 // made it true.
+//
+// Every word of Text is cleanroom's. It may name an upstream or a tool that
+// is in the policy, and it never repeats a name, a type or any other string
+// that a caller supplied. Reasons are printed by "cleanroom explain" and on
+// approval screens, to readers other than the session that made the call,
+// and a refused call can hold anything its caller chose to put in it.
 type Reason struct {
 	Text   string `json:"text"`
 	Events []int  `json:"events,omitempty"`
@@ -85,17 +91,17 @@ func Decide(p Policy, log []Event, c Call) Decision {
 	case OpReadAnswer:
 		return decideReadAnswer(p, log, c)
 	}
-	return refuse(fmt.Sprintf("unknown operation %q", c.Op))
+	return refuse("unknown operation")
 }
 
 func decideTool(p Policy, log []Event, c Call) Decision {
 	up, ok := p.Upstreams[c.Upstream]
 	if !ok {
-		return refuse(fmt.Sprintf("there is no upstream named %q", c.Upstream))
+		return refuse("there is no upstream of that name")
 	}
 	class, ok := ClassOf(up, c.Tool, c.Hint)
 	if !ok {
-		return refuse(fmt.Sprintf("tool %q has no class: the policy has no entry for it and the server gave no usable annotations", c.Tool))
+		return refuse("the tool has no class: the policy has no entry for it and the server gave no usable annotations")
 	}
 	if !validArgs(c.Args) {
 		return refuse("the arguments are not a JSON object of acceptable size")
@@ -214,7 +220,7 @@ func ambiguousKeys(dec *json.Decoder) bool {
 func decideAsk(p Policy, log []Event, c Call) Decision {
 	up, ok := p.Upstreams[c.Upstream]
 	if !ok {
-		return refuse(fmt.Sprintf("there is no source named %q", c.Upstream))
+		return refuse("there is no source of that name")
 	}
 	if len(up.Reader) == 0 {
 		return refuse(fmt.Sprintf("source %q has no reader configured", c.Upstream))
@@ -303,15 +309,15 @@ func decideReader(p Policy, log []Event, c Call, askSeq int) Decision {
 		return refuse("a reader can only call the tools of its source")
 	}
 	if c.Upstream != ask.Call.Upstream {
-		return refuse(fmt.Sprintf("this reader was started for %q and cannot reach %q", ask.Call.Upstream, c.Upstream))
+		return refuse(fmt.Sprintf("this reader was started for %q and cannot reach another upstream", ask.Call.Upstream))
 	}
 	up, ok := p.Upstreams[c.Upstream]
 	if !ok {
-		return refuse(fmt.Sprintf("there is no upstream named %q", c.Upstream))
+		return refuse("there is no upstream of that name")
 	}
 	class, ok := ClassOf(up, c.Tool, c.Hint)
 	if !ok {
-		return refuse(fmt.Sprintf("tool %q has no class", c.Tool))
+		return refuse("the tool has no class")
 	}
 	if !validArgs(c.Args) {
 		return refuse("the arguments are not a JSON object of acceptable size")

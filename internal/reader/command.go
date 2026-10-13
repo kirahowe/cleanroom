@@ -143,6 +143,11 @@ func (c *Command) mcpConfig(job Job, socket string) []byte {
 // toolServer builds the MCP server that a command reader connects to. It
 // offers the reader's tools under their own names and passes every call to
 // tools.Call, which is where the call is decided.
+//
+// A call to a tool that is not offered goes to tools.Call as well. It will
+// be refused there, and that is how the attempt gets recorded: a reader
+// reaching for a tool it was not given is the first sign that what it read
+// has taken it over.
 func toolServer(ctx context.Context, tools Tools) (*mcp.Server, error) {
 	s := mcp.NewServer(&mcp.Implementation{Name: "cleanroom-reader-tools", Version: version.Version}, nil)
 	if tools == nil {
@@ -152,6 +157,19 @@ func toolServer(ctx context.Context, tools Tools) (*mcp.Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	offered := map[string]bool{}
+	for _, tool := range list {
+		offered[tool.Name] = true
+	}
+	s.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			p, ok := req.GetParams().(*mcp.CallToolParamsRaw)
+			if method != "tools/call" || !ok || offered[p.Name] {
+				return next(ctx, method, req)
+			}
+			return tools.Call(ctx, p.Name, p.Arguments)
+		}
+	})
 	for _, tool := range list {
 		s.AddTool(&mcp.Tool{
 			Name:        tool.Name,

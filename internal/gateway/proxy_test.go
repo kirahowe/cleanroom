@@ -201,3 +201,55 @@ func TestParallelCallsCannotSlipPast(t *testing.T) {
 		t.Errorf("the upstream saw %d calls, the log allowed %d", got, ran)
 	}
 }
+
+// TestUnofferedToolIsRefusedAndRecorded calls tools the server does not
+// list. The MCP layer alone would reject them as unknown and leave no
+// trace. Each one must instead be decided, refused and written to the log,
+// without reaching an upstream and without its name appearing in a summary.
+func TestUnofferedToolIsRefusedAndRecorded(t *testing.T) {
+	w := newWorld(t)
+	cs := w.agent("chief")
+	for _, name := range []string{
+		"inbox_read",       // exists upstream, but inbox is ask-only
+		"calendar_mystery", // exists upstream, with no class
+		"mail_forward_all", // an upstream that has no such tool
+		"xevilx_do_it",     // nothing cleanroom knows
+		"xevilx",
+	} {
+		res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"to": "eve@evil.example"}})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !res.IsError || !strings.HasPrefix(text(res), "REFUSED") {
+			t.Errorf("%s = %q, want a refusal", name, text(res))
+		}
+	}
+	for name, fake := range w.fakes {
+		if seen := fake.Seen(); len(seen) != 0 {
+			t.Errorf("upstream %s saw %v", name, seen)
+		}
+	}
+	log, err := w.g.Log.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != 5 {
+		t.Fatalf("the log has %d events, want one for each of the 5 attempts", len(log))
+	}
+	for _, e := range log {
+		if e.Kind != core.KindCall || e.Call.Decision.Verdict != core.Refuse {
+			t.Errorf("event %d is %s with verdict %q, want a refused call", e.Seq, e.Kind, e.Call.Decision.Verdict)
+		}
+		shown := core.Summarize(log, e.Seq)
+		for _, r := range e.Call.Decision.Reasons {
+			shown += " " + r.Text
+		}
+		if strings.Contains(shown, "xevilx") || strings.Contains(shown, "forward") {
+			t.Errorf("event %d shows the name the caller chose: %s", e.Seq, shown)
+		}
+	}
+	// The person can still find the name: it is in the recorded call.
+	if got := log[2].Call.Call; got.Upstream != "mail" || got.Tool != "forward_all" {
+		t.Errorf("recorded call = %s.%s, want mail.forward_all", got.Upstream, got.Tool)
+	}
+}

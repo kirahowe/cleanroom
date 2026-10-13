@@ -695,3 +695,49 @@ func TestLabelsJSON(t *testing.T) {
 		t.Error("a misspelt label was accepted")
 	}
 }
+
+// TestRefusalsRepeatNothingTheCallerWrote fills every field a caller
+// controls with a marker and checks that neither the reasons for the
+// decision nor the summary of the event repeat it. Both are shown to
+// readers other than the caller: by "cleanroom explain" and "cleanroom
+// log", which an agent may run, and on approval screens.
+func TestRefusalsRepeatNothingTheCallerWrote(t *testing.T) {
+	const marker = "xevilx"
+	returns := []string{
+		`"` + marker + `"`,
+		`{"type":"` + marker + `"}`,
+		`{"type":"date","choices":["` + marker + `"]}`,
+		`{"type":"date","fields":{"` + marker + `":"date"}}`,
+		`{"type":"record","fields":{"` + marker + `":"` + marker + `"}}`,
+		`{"type":"record","fields":{"X` + marker + `":"date"}}`,
+		`{"type":"choice","choices":["` + marker + `","` + marker + `"]}`,
+		`{"type":"date","` + marker + `":1}`,
+		`{` + marker,
+	}
+	var calls []Call
+	for _, session := range []string{"chief", ReaderSession(1)} {
+		for _, upstream := range []string{marker, "mail", "inbox", "calendar"} {
+			for _, tool := range []string{marker, "search", "send"} {
+				calls = append(calls, Call{Session: session, Op: OpTool, Upstream: upstream, Tool: tool, Args: json.RawMessage(`{"a":"` + marker + `"}`)})
+			}
+			for _, r := range returns {
+				calls = append(calls, Call{Session: session, Op: OpAsk, Upstream: upstream, Question: marker, Returns: json.RawMessage(r)})
+			}
+		}
+		calls = append(calls, Call{Session: session, Op: Op(marker), Upstream: "mail", Tool: "search"})
+	}
+	w := newWorld(t)
+	w.ask("chief", "inbox", `"date"`, false) // event 1, so that reader:1 is a real reader
+	for _, c := range calls {
+		seq, d := w.do(c)
+		shown := Summarize(w.log, seq)
+		for _, r := range d.Reasons {
+			shown += " | " + r.Text
+		}
+		// A call that is not refused names an upstream and a tool from
+		// the policy, which cannot be the marker.
+		if strings.Contains(shown, marker) {
+			t.Errorf("%+v\nshows the caller's text: %s", c, shown)
+		}
+	}
+}

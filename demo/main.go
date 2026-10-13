@@ -276,6 +276,11 @@ func (d *demo) showReader(askSeq int) {
 			continue
 		}
 		name := fmt.Sprintf("%s.%s (%s)", e.Call.Call.Upstream, e.Call.Call.Tool, e.Call.Decision.Verdict)
+		if e.Call.Decision.Verdict == core.Refuse {
+			// A refused call can name any tool the mail told the
+			// reader to try, so the name is not printed here.
+			name = "a tool it was not given (refused and recorded)"
+		}
 		if counts[name] == 0 {
 			order = append(order, name)
 		}

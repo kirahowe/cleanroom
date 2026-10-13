@@ -17,14 +17,15 @@ import (
 // addUpstreamTools offers each upstream tool to the agent under the name
 // <upstream>_<tool>. Two kinds of tool are left out: tools with no class,
 // which Decide would refuse anyway, and the read tools of an ask-only
-// source.
-func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) error {
+// source. It returns every tool name the server now offers, with where each
+// comes from.
+func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) (map[string]string, error) {
 	taken := map[string]string{"status": "cleanroom", "ask": "cleanroom", "read_answer": "cleanroom"}
 	for _, name := range sortedKeys(g.Policy.Upstreams) {
 		up := g.Policy.Upstreams[name]
 		tools, err := g.Upstreams.Tools(ctx, name)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, tool := range tools {
 			hint := upstream.Hint(tool)
@@ -38,7 +39,7 @@ func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) error {
 			}
 			public := name + "_" + tool.Name
 			if other, clash := taken[public]; clash {
-				return fmt.Errorf("tool name %q is produced by both %s and %s.%s", public, other, name, tool.Name)
+				return nil, fmt.Errorf("tool name %q is produced by both %s and %s.%s", public, other, name, tool.Name)
 			}
 			taken[public] = name + "." + tool.Name
 
@@ -58,7 +59,7 @@ func (g *Gateway) addUpstreamTools(ctx context.Context, s *mcp.Server) error {
 			})
 		}
 	}
-	return nil
+	return taken, nil
 }
 
 func describeTool(upstream string, class core.Class, t core.Tool) string {
