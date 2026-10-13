@@ -163,10 +163,38 @@ the reader to one source through `cleanroom reader-tools` and a temporary Unix
 socket. The gateway authorizes each call and reuses its upstream connections.
 The socket closes when the question finishes.
 
-The demo reader in `demo/reader` uses keywords and regular expressions.
-A headless agent or a program that calls a model API can use the same
-interface, provided it has no other tools. No model-backed reader has been
-integrated or tested yet.
+The demo reader in `demo/reader` uses keywords and regular expressions and
+knows only the demo's questions.
+
+`cmd/claude-reader` is a reader backed by a model. It runs a headless
+[Claude Code](https://code.claude.com/docs/en/cli-reference) session with the
+user's own login and prints the session's answer:
+
+```jsonc
+"reader": ["/path/to/bin/claude-reader", "--mcp-config", "{mcp_config}",
+           "--question", "{question}", "--returns", "{returns}"]
+```
+
+It starts the session with no built-in tools (`--tools ""`), only the MCP
+server cleanroom supplies (`--strict-mcp-config`), no user or project settings
+and so no hooks (`--setting-sources ""`), its own system prompt, an empty
+working directory and no saved transcript. The answer is requested as
+structured output that matches the wanted type. `--model` selects the model
+and defaults to `sonnet`.
+
+These flags restrict the session; they are not a sandbox. The reader process
+runs as the user, and the restriction is only as good as Claude Code's
+handling of those flags. What the reader reads is sent to Anthropic. The
+system prompt tells the model to treat source text as data, which lowers the
+chance that a message steers it and guarantees nothing: the gateway still
+checks every call and the answer.
+
+It has been run against the demo inbox through Mailpit, with typed answers.
+It has not been evaluated for accuracy or against prompt injection.
+`examples/imap-policy.jsonc` pairs it with the IMAP mail source.
+
+Another headless agent or a program that calls a model API can use the same
+interface, provided it has no other tools.
 
 ## What the gateway enforces
 
@@ -353,7 +381,8 @@ start without its history.
 
 Remaining work:
 
-- A model-backed reader. The command interface is tested with scripted readers.
+- Readers for other models, including local ones. `claude-reader` needs
+  Claude Code and a hosted model.
 - A web source and demo scene 7, which checks that a held fetch makes no DNS
   request. The core already implements and tests the `egress` rule.
 - Approval through MCP elicitation.
@@ -369,6 +398,7 @@ would need another transport and a way for clients to identify their sessions.
 
 ```
 cmd/cleanroom/       CLI, stdio server and reader-tools connection
+cmd/claude-reader/   reader that runs a headless Claude Code session
 internal/core/       pure decisions, labels, policy and event state
 internal/typed/      pure answer validation
 internal/eventlog/   log storage and locking

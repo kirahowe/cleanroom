@@ -1,0 +1,34 @@
+// A policy for asking questions about a real mailbox over IMAP, with a
+// model as the reader. Copy it to ~/.config/cleanroom/policy.jsonc and
+// replace the paths, the address and the user name.
+//
+// The address and "starttls" are Proton Mail Bridge's defaults. See
+// sources/mail/README.md for the flags and for the password file.
+{
+	// Set this when the agent already holds private data that cleanroom
+	// cannot see, as a coding agent does.
+	"sessions_start_private": true,
+
+	"upstreams": {
+		"mail": {
+			"command": ["/path/to/cleanroom/bin/mail-source",
+				"--imap-addr", "127.0.0.1:1143", "--imap-tls", "starttls",
+				"--imap-user", "you@example.com",
+				"--imap-password-file", "/Users/you/.config/cleanroom/imap-password"],
+			"labels": ["contaminated", "private"],
+			"ask_only": true,
+
+			// A headless Claude Code session reads the mail. What it reads
+			// is sent to Anthropic. See "Reader back ends" in the README.
+			"reader": ["/path/to/cleanroom/bin/claude-reader",
+				"--mcp-config", "{mcp_config}",
+				"--question", "{question}",
+				"--returns", "{returns}"],
+
+			"tools": {
+				"search": {"class": "read"},
+				"read": {"class": "read"},
+			},
+		},
+	},
+}

@@ -15,6 +15,7 @@ SMTP     := 127.0.0.1:11025
 
 build:
 	go build -o $(BIN)/cleanroom ./cmd/cleanroom
+	go build -o $(BIN)/claude-reader ./cmd/claude-reader
 	go build -o $(BIN)/seed ./demo/seed
 	go build -o $(BIN)/demo-reader ./demo/reader
 	cd sources/mail && go build -o ../../$(BIN)/mail-source .
