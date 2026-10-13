@@ -109,9 +109,17 @@ func TestRun(t *testing.T) {
 	}
 }
 
-func TestRunWithoutAnAnswer(t *testing.T) {
-	config := mcpConfig(t, oneServer)
-	now := time.Now()
+// exited is the error from running a session that ended with a status.
+func exited(status int) error {
+	if status == 0 {
+		return nil
+	}
+	return fmt.Errorf("exit status %d", status)
+}
+
+var server = json.RawMessage(`{"command":"/bin/cleanroom","args":["reader-tools"]}`)
+
+func TestOutcomeWithoutAnAnswer(t *testing.T) {
 	for name, tc := range map[string]struct {
 		output string
 		exit   int
@@ -124,8 +132,7 @@ func TestRunWithoutAnAnswer(t *testing.T) {
 		"not json":             {`Error: not logged in`, 1, ""},
 		"nothing":              {``, 0, ""},
 	} {
-		claude := fakeClaude(t, t.TempDir(), tc.output, tc.exit)
-		answer, _, err := run(context.Background(), claude, "sonnet", config, "q", `"date"`, now)
+		answer, _, err := outcome([]byte(tc.output), "", exited(tc.exit), server)
 		if tc.answer == "" && err == nil {
 			t.Errorf("%s: got %s, want an error", name, answer)
 		}
@@ -244,13 +251,12 @@ func TestSystemPrompt(t *testing.T) {
 
 // Claude Code ends a session it could not log in for with an error result
 // and status 1. The outputs are the ones version 2.1.296 printed.
-func TestRunWhenNotLoggedIn(t *testing.T) {
+func TestOutcomeWhenNotLoggedIn(t *testing.T) {
 	for name, output := range map[string]string{
 		"never logged in": `{"type":"result","subtype":"success","is_error":true,"num_turns":1,"terminal_reason":"api_error","result":"Not logged in · Please run /login"}`,
 		"login expired":   `{"type":"result","subtype":"success","is_error":true,"num_turns":1,"terminal_reason":"api_error","result":"Failed to authenticate: OAuth session expired and could not be refreshed"}`,
 	} {
-		claude := fakeClaude(t, t.TempDir(), output, 1)
-		answer, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now())
+		answer, _, err := outcome([]byte(output), "", exited(1), server)
 		if !errors.Is(err, errNotLoggedIn) {
 			t.Errorf("%s: got %s, %v", name, answer, err)
 		}
@@ -262,8 +268,7 @@ func TestRunWhenNotLoggedIn(t *testing.T) {
 		"overloaded":   `{"subtype":"success","is_error":true,"terminal_reason":"api_error","result":"API Error: 529 Overloaded"}`,
 		"model's text": `{"subtype":"success","is_error":false,"terminal_reason":"completed","result":"Not logged in · Please run /login"}`,
 	} {
-		claude := fakeClaude(t, t.TempDir(), output, 1)
-		if _, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now()); err == nil || errors.Is(err, errNotLoggedIn) {
+		if _, _, err := outcome([]byte(output), "", exited(1), server); err == nil || errors.Is(err, errNotLoggedIn) {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}
@@ -285,13 +290,9 @@ func TestExitStatus(t *testing.T) {
 
 // When the user's settings keep the tools from loading, the reader says
 // what to change. It does not answer from a session that could read nothing.
-func TestRunWhenTheToolsAreBlocked(t *testing.T) {
-	dir := t.TempDir()
-	claude := fakeClaude(t, dir, `{"subtype":"success","structured_output":{"answer":null}}`, 0)
-	if err := os.WriteFile(filepath.Join(dir, "stderr"), []byte("Warning: MCP server blocked by enterprise policy: cleanroom\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	answer, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now())
+func TestOutcomeWhenTheToolsAreBlocked(t *testing.T) {
+	answer, _, err := outcome([]byte(`{"subtype":"success","structured_output":{"answer":null}}`),
+		"Warning: MCP server blocked by enterprise policy: cleanroom\n", nil, server)
 	if !errors.Is(err, errToolsBlocked) || !strings.Contains(err.Error(), `{ "serverCommand": ["/bin/cleanroom","reader-tools"] }`) || !strings.Contains(err.Error(), "allowedMcpServers") {
 		t.Errorf("got %s, %v", answer, err)
 	}

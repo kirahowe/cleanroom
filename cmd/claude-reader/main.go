@@ -119,14 +119,21 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
-	if strings.Contains(stderr.String(), "MCP server blocked") {
+	return outcome(stdout.Bytes(), stderr.String(), runErr, server)
+}
+
+// outcome reads what a finished session left behind: what it printed, and
+// the error from running it, if any. It returns the line to print and the
+// report, as run does.
+func outcome(stdout []byte, stderr string, runErr error, server json.RawMessage) (answer []byte, report string, err error) {
+	if strings.Contains(stderr, "MCP server blocked") {
 		return nil, "", fmt.Errorf("%w.\n%s", errToolsBlocked, blockedHelp(server))
 	}
 
-	result, parseErr := parseResult(stdout.Bytes())
+	result, parseErr := parseResult(stdout)
 	switch {
 	case parseErr != nil && runErr != nil:
-		return nil, "", fmt.Errorf("running %s: %w", claude, runErr)
+		return nil, "", fmt.Errorf("running Claude Code: %w", runErr)
 	case parseErr != nil:
 		return nil, "", parseErr
 	}
