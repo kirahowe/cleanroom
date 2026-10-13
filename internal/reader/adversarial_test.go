@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,29 +21,8 @@ import (
 	"cleanroom/internal/typed"
 )
 
-// argDump is a reader that writes each of its arguments to a file, one per
-// file, so a test can see exactly what argv it was given.
-func argDump(t *testing.T) (argv0, dir string) {
-	dir = t.TempDir()
-	return script(t, `
-i=0
-for a in "$@"; do i=$((i+1)); printf '%s' "$a" > "`+dir+`/arg$i"; done
-echo $i > "`+dir+`/count"
-echo '{"answer": true}'
-`), dir
-}
-
-func readArg(t *testing.T, dir string, i int) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(dir, "arg"+strconv.Itoa(i)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
-
 // TestPlaceholdersAreSubstitutedOnce asks questions that are themselves
-// placeholders. Substitution must not look at its own output, the question
+// placeholders. Substitution must not look at its own output, each argument
 // must stay one argument, and the config path must not leak into another.
 func TestPlaceholdersAreSubstitutedOnce(t *testing.T) {
 	questions := []string{
@@ -51,48 +31,19 @@ func TestPlaceholdersAreSubstitutedOnce(t *testing.T) {
 		"$(id)", "`id`", "$HOME", "a\"b", `a\`, "{", "}", "{mcp_config", "é\u202e\u0000"[:5],
 	}
 	returns := []string{`"date"`, `{"type":"choice","choices":["{mcp_config}","{question}","{source}"]}`}
-	argv0, dir := argDump(t)
+	const config = "/tmp/cleanroom-reader-1/mcp.json"
+	argv := []string{"reader", "{question}", "{returns}", "{source}", "{mcp_config}", "q={question};r={returns};s={source}", "fixed"}
 	for _, q := range questions {
 		for _, r := range returns {
-			for i := 1; i <= 6; i++ {
-				os.Remove(filepath.Join(dir, "arg"+strconv.Itoa(i)))
-			}
-			c := &Command{
-				Argv: []string{argv0, "{question}", "{returns}", "{source}", "{mcp_config}", "q={question};r={returns};s={source}", "fixed"},
-				Pipe: []string{"/bin/cleanroom", "reader-tools"},
-			}
-			if _, err := c.Answer(context.Background(), Job{Ask: 3, Source: "inbox", Question: q, Returns: json.RawMessage(r)}); err != nil {
-				t.Fatalf("question %q: %v", q, err)
-			}
-			if n := strings.TrimSpace(mustRead(t, filepath.Join(dir, "count"))); n != "6" {
-				t.Fatalf("question %q: the reader got %s arguments, want 6", q, n)
-			}
-			config := readArg(t, dir, 4)
-			if !strings.HasSuffix(config, "mcp.json") || !filepath.IsAbs(config) {
-				t.Fatalf("question %q: config argument is %q", q, config)
-			}
-			if got := readArg(t, dir, 1); got != q {
-				t.Errorf("question %q arrived as %q", q, got)
-			}
-			if got := readArg(t, dir, 2); got != r {
-				t.Errorf("question %q: returns %q arrived as %q", q, r, got)
-			}
-			if got := readArg(t, dir, 3); got != "inbox" {
-				t.Errorf("question %q: source arrived as %q", q, got)
-			}
-			if got, want := readArg(t, dir, 5), "q="+q+";r="+r+";s=inbox"; got != want {
-				t.Errorf("question %q: combined argument %q, want %q", q, got, want)
-			}
-			if readArg(t, dir, 6) != "fixed" {
-				t.Errorf("question %q moved a later argument", q)
-			}
-			// The config path appears only where the policy put it.
-			for _, i := range []int{1, 2, 3, 5} {
-				if strings.Contains(readArg(t, dir, i), config) {
-					t.Errorf("question %q: the config path leaked into argument %d", q, i)
-				}
+			got := substitute(argv, Job{Ask: 3, Source: "inbox", Question: q, Returns: json.RawMessage(r)}, config)
+			want := []string{"reader", q, r, "inbox", config, "q=" + q + ";r=" + r + ";s=inbox", "fixed"}
+			if !slices.Equal(got, want) {
+				t.Errorf("question %q, returns %q:\n got %q\nwant %q", q, r, got, want)
 			}
 		}
+	}
+	if argv[1] != "{question}" {
+		t.Error("substitute changed the policy's own command line")
 	}
 }
 
@@ -110,7 +61,7 @@ func mustRead(t *testing.T, path string) string {
 func TestConfigFileIsGoneAndPrivate(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "seen")
 	c := &Command{
-		Argv: []string{script(t, `stat -f '%Lp %N' "$1" "$(dirname "$1")" > "`+out+`" 2>/dev/null || stat -c '%a %n' "$1" "$(dirname "$1")" > "`+out+`"; echo '{"answer": 1}'`), "{mcp_config}"},
+		Argv: sh(`stat -f '%Lp %N' "$1" "$(dirname "$1")" > "`+out+`" 2>/dev/null || stat -c '%a %n' "$1" "$(dirname "$1")" > "`+out+`"; echo '{"answer": 1}'`, "{mcp_config}"),
 		Pipe: []string{"x"},
 	}
 	if _, err := c.Answer(context.Background(), Job{Ask: 1, Source: `we"ird\name`}); err != nil {
@@ -127,19 +78,22 @@ func TestConfigFileIsGoneAndPrivate(t *testing.T) {
 }
 
 // TestOutputFloodIsBounded has the reader print far more than the limit.
-// Answer must fail, quickly, without holding the flood in memory.
+// Answer must refuse it without holding the flood in memory, which shows
+// that the reader's stdout goes through the capped writer. A few megabytes
+// are enough to tell: a buffer that kept them would allocate more than
+// that, and the capped one stays under a hundred kilobytes.
 func TestOutputFloodIsBounded(t *testing.T) {
-	c := &Command{Argv: []string{script(t, `head -c 100000000 /dev/zero | tr '\0' 'x'; echo; echo '{"answer": true}'`)}, Pipe: []string{"x"}}
+	const flood = 4 << 20
+	c := &Command{Argv: sh(`head -c ` + strconv.Itoa(flood) + ` /dev/zero; echo; echo '{"answer": true}'`), Pipe: []string{"x"}}
 	var before, after runtime.MemStats
-	runtime.GC()
 	runtime.ReadMemStats(&before)
 	raw, err := c.Answer(context.Background(), Job{Ask: 1, Source: "mail"})
 	runtime.ReadMemStats(&after)
 	if err == nil {
-		t.Errorf("a 100 MB output gave the answer %q", raw)
+		t.Errorf("a %d MB output gave the answer %q", flood>>20, raw)
 	}
-	if grew := int64(after.TotalAlloc) - int64(before.TotalAlloc); grew > 64<<20 {
-		t.Errorf("Answer allocated %d MB while reading the flood", grew>>20)
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > flood/4 {
+		t.Errorf("Answer allocated %d kB while reading a %d MB flood", grew>>10, flood>>20)
 	}
 }
 
@@ -153,37 +107,57 @@ func TestCappedWriterKeepsOnlyTheLimit(t *testing.T) {
 	}
 }
 
-// TestTimeoutKillsTheWholeProcessGroup starts a reader that forks children
-// which ignore hangup and hold the pipes. When time runs out all of them
-// must be gone.
-func TestTimeoutKillsTheWholeProcessGroup(t *testing.T) {
-	pids := filepath.Join(t.TempDir(), "pids")
-	c := &Command{Argv: []string{script(t, `
+// TestStoppingKillsTheWholeProcessGroup starts a reader that forks children
+// which ignore hangup and hold the pipes. When the job is stopped all of
+// them must be gone. The reader says when its children are running by
+// writing to a named pipe, so the test stops it then and waits for nothing.
+// After that the reader starts no more processes: one started while the
+// group is being killed can be missed, and holds the pipes until the wait
+// delay runs out.
+func TestStoppingKillsTheWholeProcessGroup(t *testing.T) {
+	dir := t.TempDir()
+	pids, ready := filepath.Join(dir, "pids"), filepath.Join(dir, "ready")
+	if err := syscall.Mkfifo(ready, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &Command{Argv: sh(`
 trap '' HUP TERM INT
-(trap '' HUP TERM INT; sleep 60) &
-echo $! >> "`+pids+`"
-(trap '' HUP TERM INT; sleep 60) &
-echo $! >> "`+pids+`"
-echo $$ >> "`+pids+`"
-sleep 60
-`)}, Pipe: []string{"x"}}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+(trap '' HUP TERM INT; exec sleep 60) &
+echo $! >> "` + pids + `"
+(trap '' HUP TERM INT; exec sleep 60) &
+echo $! >> "` + pids + `"
+echo $$ >> "` + pids + `"
+echo ready > "` + ready + `"
+wait
+`), Pipe: []string{"x"}}
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	start := time.Now()
-	if _, err := c.Answer(ctx, Job{Ask: 1, Source: "mail"}); err == nil || !strings.Contains(err.Error(), "out of time") {
-		t.Errorf("err = %v, want a timeout", err)
+	go func() {
+		os.ReadFile(ready) // returns once the reader has written
+		cancel()
+	}()
+	if _, err := c.Answer(ctx, Job{Ask: 1, Source: "mail"}); err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Errorf("err = %v, want an interruption", err)
 	}
-	if took := time.Since(start); took > 9*time.Second {
-		t.Errorf("Answer took %v", took)
-	}
-	time.Sleep(200 * time.Millisecond)
 	for field := range strings.FieldsSeq(mustRead(t, pids)) {
 		pid, _ := strconv.Atoi(field)
-		if pid > 1 && syscall.Kill(pid, 0) == nil {
+		if pid > 1 && !gone(pid) {
 			t.Errorf("process %d of the reader's group is still running", pid)
 			syscall.Kill(pid, syscall.SIGKILL) // a pid this test started
 		}
 	}
+}
+
+// gone reports whether a process has ended. A killed process whose parent
+// died with it stays visible until the system collects it, so gone looks
+// again until it has. The deadline only bounds a failing test.
+func gone(pid int) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // FuzzParseOutputBounds adds to FuzzParseOutput: the answer is never

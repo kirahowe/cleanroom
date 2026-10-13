@@ -119,17 +119,7 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 		return nil, err
 	}
 
-	replace := strings.NewReplacer(
-		"{mcp_config}", configPath,
-		"{question}", job.Question,
-		"{returns}", string(job.Returns),
-		"{source}", job.Source,
-	)
-	argv := make([]string, len(c.Argv))
-	for i, arg := range c.Argv {
-		argv[i] = replace.Replace(arg)
-	}
-
+	argv := substitute(c.Argv, job, configPath)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = c.Dir
 	// Run the reader in its own process group and stop the whole group
@@ -146,24 +136,45 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	if err != nil {
-		switch {
-		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			return nil, errors.New("the reader ran out of time")
-		case ctx.Err() != nil:
-			return nil, errors.New("the reader was interrupted")
-		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			switch exit.ExitCode() {
-			case ExitToolsBlocked:
-				return nil, ErrToolsBlocked
-			case ExitNotLoggedIn:
-				return nil, ErrNotLoggedIn
-			}
-		}
-		return nil, fmt.Errorf("the reader failed: %w", err)
+		return nil, failure(ctx.Err(), cmd.ProcessState.ExitCode(), err)
 	}
 	return ParseOutput(out.buf.Bytes())
+}
+
+// substitute fills the placeholders in a reader's command line. Each
+// argument is replaced in one pass, so a question that is itself a
+// placeholder stays as the person wrote it, and an argument never splits
+// in two.
+func substitute(argv []string, job Job, configPath string) []string {
+	replace := strings.NewReplacer(
+		"{mcp_config}", configPath,
+		"{question}", job.Question,
+		"{returns}", string(job.Returns),
+		"{source}", job.Source,
+	)
+	out := make([]string, len(argv))
+	for i, arg := range argv {
+		out[i] = replace.Replace(arg)
+	}
+	return out
+}
+
+// failure names why a reader's run failed, given the state of the job's
+// context, the status the reader exited with (-1 if it did not exit) and
+// the error from running it. A job that was stopped failed for that
+// reason, whatever status the reader left behind.
+func failure(ctxErr error, exit int, runErr error) error {
+	switch {
+	case errors.Is(ctxErr, context.DeadlineExceeded):
+		return errors.New("the reader ran out of time")
+	case ctxErr != nil:
+		return errors.New("the reader was interrupted")
+	case exit == ExitToolsBlocked:
+		return ErrToolsBlocked
+	case exit == ExitNotLoggedIn:
+		return ErrNotLoggedIn
+	}
+	return fmt.Errorf("the reader failed: %w", runErr)
 }
 
 // mcpConfig is the file a command reader is pointed at. It uses the
