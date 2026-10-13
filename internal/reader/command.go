@@ -146,8 +146,11 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return nil, errors.New("the reader ran out of time")
+		case ctx.Err() != nil:
+			return nil, errors.New("the reader was interrupted")
 		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {

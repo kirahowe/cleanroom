@@ -222,6 +222,17 @@ func TestCommandIsStoppedWhenTimeRunsOut(t *testing.T) {
 	}
 }
 
+// A reader stopped by its caller did not run out of time, and the log
+// should not say it did.
+func TestCommandSaysWhenItWasInterrupted(t *testing.T) {
+	c := &Command{Argv: []string{script(t, `sleep 30`)}, Pipe: []string{"x"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Answer(ctx, Job{Ask: 1, Source: "mail"}); err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Errorf("err = %v, want an interruption", err)
+	}
+}
+
 // FuzzParseOutput checks that no reader output can crash the parser, and
 // that whatever it returns is valid JSON taken from the output.
 func FuzzParseOutput(f *testing.F) {
