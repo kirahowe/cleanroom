@@ -354,10 +354,30 @@ Nothing needs changing unless your Claude Code settings set
 ]
 ```
 
-If the list also has `serverCommand` entries, Claude Code matches local
-servers by command and ignores the name. The reader's server command changes
-with every question, so that case needs the name-only form. Until the entry
-is there, `ask` reports no answer and says why.
+Until the entry is there, `ask` reports no answer and says why. A list that
+also has `serverCommand` entries is not supported: Claude Code then matches
+local servers by command and ignores names, and the reader's server command
+is different for every question.
+
+### From a coding session
+
+`skills/cleanroom` is a Claude Code skill. With it installed, an ordinary
+Claude Code session answers questions about your mail by running
+`cleanroom ask`, and picks the answer type itself. Install it by linking it
+into your skills directory, and put `cleanroom` on your `PATH`:
+
+```sh
+ln -s "$PWD/skills/cleanroom" ~/.claude/skills/cleanroom
+ln -s "$PWD/bin/cleanroom" /usr/local/bin/cleanroom
+```
+
+The session runs `ask` without a terminal, so it receives checked values and
+never mail text; free text is stored for you to read with `cleanroom show`.
+This path has no `accept_contamination`.
+
+The skill is guidance and not enforcement. A session with a shell can still
+reach your mail in other ways if something else steers it there. What this
+gives you is that asking about mail no longer puts mail text in the session.
 
 ### A conversation in Claude Code
 
@@ -470,6 +490,7 @@ would need another transport and a way for clients to identify their sessions.
 ```
 cmd/cleanroom/       CLI, stdio server and reader-tools connection
 cmd/claude-reader/   reader that runs a headless Claude Code session
+skills/cleanroom/    Claude Code skill that asks through `cleanroom ask`
 internal/core/       pure decisions, labels, policy and event state
 internal/typed/      pure answer validation
 internal/eventlog/   log storage and locking
