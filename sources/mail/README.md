@@ -34,10 +34,14 @@ when used with cleanroom. The environment is not read.
 | `--imap-user` | | required with `--imap-addr` |
 | `--imap-password-file` | | required with `--imap-addr` |
 | `--imap-ca-file` | | PEM certificate to trust instead of the system's |
-| `--imap-mailbox` | `INBOX` | the one mailbox to read |
+| `--imap-mailbox` | all mail | the one mailbox to read |
 | `--check` | | log in, print the message count and exit |
 
 ## IMAP back end
+
+Without `--imap-mailbox`, the server reads the mailbox that holds all mail:
+the one the IMAP server marks `\All`, or else one named "All Mail". If there
+is neither, it reads INBOX.
 
 The server logs in, opens one mailbox with `EXAMINE` and keeps that connection.
 `EXAMINE` is read-only, and messages are fetched with `BODY.PEEK`, so reading
@@ -103,7 +107,8 @@ installs its certificate in the macOS keychain, so it verifies without
 
 Limits:
 
-- One mailbox per server. To search several, run one upstream for each.
+- One mailbox per server. A server with no all-mail mailbox gets INBOX, and
+  mail filed elsewhere is not found. `--check` says which mailbox was opened.
 - Search quality is the IMAP server's. A reader has to try several queries.
 - The connection is used for one call at a time.
 - Only password login is supported. Accounts that require OAuth cannot be

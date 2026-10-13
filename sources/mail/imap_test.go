@@ -72,6 +72,7 @@ func startIMAP(t *testing.T, startTLS bool) testIMAP {
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return mem.NewSession(), nil, nil
 		},
+		Caps:   imap.CapSet{imap.CapIMAP4rev1: {}, imap.CapSpecialUse: {}},
 		Logger: log.New(io.Discard, "", 0),
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -246,9 +247,9 @@ func TestIMAPReadLeavesTheMessageUnread(t *testing.T) {
 func TestIMAPStartTLS(t *testing.T) {
 	server := startIMAP(t, true)
 	box := server.box(t, func(o *imapOptions) { o.startTLS = true })
-	count, err := box.Count(context.Background())
-	if err != nil || count != uint32(len(testMessages)) {
-		t.Errorf("count = %d, %v", count, err)
+	mailbox, count, err := box.Open(context.Background())
+	if err != nil || mailbox != "INBOX" || count != uint32(len(testMessages)) {
+		t.Errorf("opened %q with %d messages, %v", mailbox, count, err)
 	}
 }
 
@@ -282,7 +283,7 @@ func TestIMAPConnectErrors(t *testing.T) {
 		// for STARTTLS gets nowhere. Nothing falls back to plain text.
 		"starttls against a TLS port": {func(o *imapOptions) { o.startTLS = true }, "TLS"},
 	} {
-		if _, err := server.box(t, tc.change).Count(ctx); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, _, err := server.box(t, tc.change).Open(ctx); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want an error mentioning %q", name, err, tc.want)
 		}
 	}
@@ -309,7 +310,7 @@ func TestIMAPNeverLogsInWithoutTLS(t *testing.T) {
 	for _, startTLS := range []bool{true, false} {
 		box := real.box(t, func(o *imapOptions) { o.addr, o.startTLS = ln.Addr().String(), startTLS })
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, err := box.Count(ctx)
+		_, _, err := box.Open(ctx)
 		cancel()
 		if err == nil {
 			t.Errorf("startTLS=%v: connected to a server without TLS", startTLS)
@@ -398,5 +399,57 @@ func TestNewIMAPRejectsABadCAFile(t *testing.T) {
 	opts.caFile = opts.passwordFile
 	if _, err := newIMAP(opts); err == nil || !strings.Contains(err.Error(), "no PEM certificate") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// With no mailbox configured, the one that holds all mail is read, so mail
+// filed outside the inbox is found. The test server cannot mark a mailbox
+// with \All, so this one is found by its name; TestAllMailbox covers the
+// attribute.
+func TestIMAPReadsAllMailByDefault(t *testing.T) {
+	server := startIMAP(t, false)
+	if err := server.user.Create("All Mail", nil); err != nil {
+		t.Fatal(err)
+	}
+	archived := "From: Dentist <office@example.com>\nSubject: Appointment\n\nFiled away long ago.\n"
+	if _, err := server.user.Append("All Mail", strings.NewReader(crlf(archived)), &imap.AppendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	box := server.box(t, func(o *imapOptions) { o.mailbox = "" })
+	if mailbox, _, err := box.Open(ctx); err != nil || mailbox != "All Mail" {
+		t.Fatalf("opened %q, %v", mailbox, err)
+	}
+	if found, err := box.Search(ctx, "appointment", 10); err != nil || len(found) != 1 {
+		t.Errorf("archived mail: %+v, %v", found, err)
+	}
+
+	inboxOnly := server.box(t, nil)
+	if found, err := inboxOnly.Search(ctx, "appointment", 10); err != nil || len(found) != 0 {
+		t.Errorf("INBOX was named, so only INBOX is read: %+v, %v", found, err)
+	}
+}
+
+func TestAllMailbox(t *testing.T) {
+	box := func(name string, attrs ...imap.MailboxAttr) *imap.ListData {
+		return &imap.ListData{Mailbox: name, Delim: '/', Attrs: attrs}
+	}
+	for name, tc := range map[string]struct {
+		list []*imap.ListData
+		want string
+	}{
+		"marked by the server": {[]*imap.ListData{box("INBOX"), box("All Mail"), box("Archive", imap.MailboxAttrAll)}, "Archive"},
+		"by name":              {[]*imap.ListData{box("INBOX"), box("Sent"), box("All Mail")}, "All Mail"},
+		"by name, nested":      {[]*imap.ListData{box("INBOX"), box("[Gmail]", imap.MailboxAttrNoSelect), box("[Gmail]/All Mail")}, "[Gmail]/All Mail"},
+		"name in another case": {[]*imap.ListData{box("INBOX"), box("all mail")}, "all mail"},
+		"marked but unusable":  {[]*imap.ListData{box("INBOX"), box("Everything", imap.MailboxAttrAll, imap.MailboxAttrNoSelect)}, "INBOX"},
+		"a look-alike name":    {[]*imap.ListData{box("INBOX"), box("Folders/Not All Mail")}, "INBOX"},
+		"neither":              {[]*imap.ListData{box("INBOX"), box("Sent")}, "INBOX"},
+		"empty":                {nil, "INBOX"},
+	} {
+		if got := allMailbox(tc.list); got != tc.want {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
 	}
 }

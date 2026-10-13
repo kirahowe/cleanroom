@@ -29,7 +29,7 @@ func TestParseConfigIMAP(t *testing.T) {
 	}
 	want := imapOptions{
 		addr: "127.0.0.1:1143", host: "127.0.0.1", startTLS: true,
-		user: "kira@example.com", passwordFile: "/secrets/imap", mailbox: "INBOX",
+		user: "kira@example.com", passwordFile: "/secrets/imap",
 	}
 	if cfg.imap == nil || *cfg.imap != want || cfg.check {
 		t.Errorf("got %+v", cfg.imap)
@@ -79,7 +79,6 @@ func TestParseConfigErrors(t *testing.T) {
 		{"--imap-addr", "host", "--imap-user", "kira", "--imap-password-file", "p"},
 		{"--imap-addr", ":993", "--imap-user", "kira", "--imap-password-file", "p"},
 		{"--imap-addr", "host:993", "--imap-user", "kira", "--imap-password-file", "p", "--imap-tls", "none"},
-		{"--imap-addr", "host:993", "--imap-user", "kira", "--imap-password-file", "p", "--imap-mailbox", ""},
 		{"--imap-addr", "host:993", "--imap-user", "kira", "--imap-password-file", "p", "--mailpit-url", "http://127.0.0.1:8025"},
 		// There is no flag that takes the password itself.
 		{"--imap-addr", "host:993", "--imap-user", "kira", "--imap-password", "hunter2"},

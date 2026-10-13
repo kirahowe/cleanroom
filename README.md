@@ -315,8 +315,10 @@ bin/cleanroom ask "When is my next dentist appointment?"
 ```
 
 `init` defaults to Proton Mail Bridge's address (`127.0.0.1:1143`, STARTTLS);
-`--imap-addr`, `--imap-tls` and `--imap-mailbox` change that. It logs in before
-it writes anything. On success it writes `~/.config/cleanroom/policy.jsonc`
+`--imap-addr` and `--imap-tls` change that. It reads the mailbox that holds
+all mail, so archived and filed messages are found; `--imap-mailbox` names
+another. It logs in before it writes anything and prints which mailbox it
+opened. On success it writes `~/.config/cleanroom/policy.jsonc`
 and, beside it, the password in a file only you can read. `init` needs a
 terminal and takes the password only from the keyboard.
 
@@ -409,8 +411,9 @@ start without its history.
 - **Replay:** `explain` uses the current policy. It reports a mismatch if that
   policy produces a different decision from the recorded one.
 - **Mail:** reading a message through Mailpit marks it as read. The IMAP back
-  end leaves messages unread, reads one mailbox, and supports password login
-  only. See `sources/mail/README.md`.
+  end leaves messages unread and supports password login only. It reads one
+  mailbox: the server's all-mail mailbox, or INBOX on a server without one.
+  See `sources/mail/README.md`.
 - **Log storage:** each decision reads the entire log. It has no checksum and
   cannot detect truncation at a line boundary or tampering by another process
   running as the same user. An unreadable or malformed log stops decisions.

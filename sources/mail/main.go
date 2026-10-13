@@ -29,11 +29,11 @@ func main() {
 			log.Fatal(err)
 		}
 		if cfg.check {
-			count, err := box.Count(ctx)
+			name, count, err := box.Open(ctx)
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Println(checkReport(*cfg.imap, count))
+			fmt.Println(checkReport(*cfg.imap, name, count))
 			return
 		}
 		mailbox = box
@@ -44,7 +44,11 @@ func main() {
 	}
 }
 
-func checkReport(opts imapOptions, count uint32) string {
-	return fmt.Sprintf("Logged in to %s as %s. Mailbox %q is open read-only and holds %d messages.",
-		opts.addr, opts.user, opts.mailbox, count)
+func checkReport(opts imapOptions, mailbox string, count uint32) string {
+	report := fmt.Sprintf("Logged in to %s as %s. Mailbox %q is open read-only and holds %d messages.",
+		opts.addr, opts.user, mailbox, count)
+	if opts.mailbox == "" && mailbox == "INBOX" {
+		report += "\nThis server has no all-mail mailbox, so mail filed outside INBOX will not be found. Name another mailbox with --imap-mailbox."
+	}
+	return report
 }

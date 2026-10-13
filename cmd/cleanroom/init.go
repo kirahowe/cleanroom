@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -27,11 +28,14 @@ type starter struct {
 
 // mailSourceArgs is the mail source's command line, without the program.
 func (s starter) mailSourceArgs() []string {
-	return []string{
+	args := []string{
 		"--imap-addr", s.addr, "--imap-tls", s.tlsMode,
 		"--imap-user", s.user, "--imap-password-file", s.passwordFile,
-		"--imap-mailbox", s.mailbox,
 	}
+	if s.mailbox != "" {
+		args = append(args, "--imap-mailbox", s.mailbox)
+	}
+	return args
 }
 
 // starterPolicy is the text of the policy file. It is written as text and
@@ -45,7 +49,11 @@ func starterPolicy(s starter) string {
 		}
 		return strings.Join(parts, ", ")
 	}
-	args := s.mailSourceArgs()
+	// The command, one flag and its value to a line.
+	command := []string{quoted(s.mailSource)}
+	for pair := range slices.Chunk(s.mailSourceArgs(), 2) {
+		command = append(command, quoted(pair...))
+	}
 	return `// Written by "cleanroom init". This file is the trusted part of cleanroom's
 // configuration. See the README for what each setting does.
 {
@@ -55,10 +63,7 @@ func starterPolicy(s starter) string {
 
 	"upstreams": {
 		"mail": {
-			"command": [` + quoted(s.mailSource) + `,
-				` + quoted(args[0:4]...) + `,
-				` + quoted(args[4:8]...) + `,
-				` + quoted(args[8:]...) + `],
+			"command": [` + strings.Join(command, ",\n\t\t\t\t") + `],
 			"labels": ["contaminated", "private"],
 
 			// Agents cannot read mail directly. They ask, and a reader reads.
@@ -102,7 +107,7 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	fs.StringVar(&s.addr, "imap-addr", "127.0.0.1:1143", "IMAP server as host:port; the default is Proton Mail Bridge's")
 	fs.StringVar(&s.tlsMode, "imap-tls", "starttls", "starttls, or implicit for TLS from the first byte (usually port 993)")
 	fs.StringVar(&s.user, "imap-user", "", "IMAP user name; asked for when not given")
-	fs.StringVar(&s.mailbox, "imap-mailbox", "INBOX", "the mailbox to read")
+	fs.StringVar(&s.mailbox, "imap-mailbox", "", "the mailbox to read (default: the server's all-mail mailbox)")
 	binDir := fs.String("bin-dir", "", "directory holding mail-source and claude-reader (default: beside this program)")
 	return func(ctx context.Context) error {
 		if !c.terminal {

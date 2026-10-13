@@ -39,7 +39,8 @@ var (
 	errNotFound = errors.New("message not found")
 )
 
-// imapBox reads one mailbox of an IMAP account. It has no way to send, and
+// imapBox reads one mailbox of an IMAP account: the one configured, or
+// else the one that holds all mail. It has no way to send, and
 // it cannot change the mailbox either: it opens the mailbox with EXAMINE,
 // which is read-only, and fetches with BODY.PEEK, which leaves a message
 // unread.
@@ -56,6 +57,9 @@ type imapBox struct {
 	mu       sync.Mutex
 	client   *imapclient.Client
 	selected *imap.SelectData
+	// mailbox is the name of the open mailbox, which the server chose
+	// when the configuration named none.
+	mailbox string
 }
 
 // newIMAP reads the password and certificate files named in opts. It does
@@ -192,15 +196,14 @@ func (b *imapBox) Read(ctx context.Context, id string) (Message, error) {
 	return msg, err
 }
 
-// Count connects if needed and reports how many messages the mailbox held
-// when it was opened.
-func (b *imapBox) Count(ctx context.Context) (uint32, error) {
-	var n uint32
-	err := b.do(ctx, func(*imapclient.Client, uint32) error {
-		n = b.selected.NumMessages
+// Open connects if needed and reports which mailbox is open and how many
+// messages it held when it was opened.
+func (b *imapBox) Open(ctx context.Context) (mailbox string, count uint32, err error) {
+	err = b.do(ctx, func(*imapclient.Client, uint32) error {
+		mailbox, count = b.mailbox, b.selected.NumMessages
 		return nil
 	})
-	return n, err
+	return mailbox, count, err
 }
 
 // imapID names a message for the read tool. A UID alone is not enough: the
@@ -273,7 +276,7 @@ func (b *imapBox) drop() {
 	if b.client != nil {
 		b.client.Close()
 	}
-	b.client, b.selected = nil, nil
+	b.client, b.selected, b.mailbox = nil, nil, ""
 }
 
 // connect dials, logs in and opens the mailbox read-only. TLS is always
@@ -302,11 +305,48 @@ func (b *imapBox) connect(ctx context.Context) error {
 		client.Close()
 		return fmt.Errorf("logging in to the mail server: %w", err)
 	}
-	selected, err := client.Select(b.opts.mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
+	mailbox := b.opts.mailbox
+	if mailbox == "" {
+		list, err := client.List("", "*", &imap.ListOptions{ReturnSpecialUse: client.Caps().Has(imap.CapSpecialUse)}).Collect()
+		if err != nil {
+			client.Close()
+			return fmt.Errorf("listing mailboxes: %w", err)
+		}
+		mailbox = allMailbox(list)
+	}
+	selected, err := client.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
 		client.Close()
-		return fmt.Errorf("opening mailbox %q: %w", b.opts.mailbox, err)
+		return fmt.Errorf("opening mailbox %q: %w", mailbox, err)
 	}
-	b.client, b.selected = client, selected
+	b.client, b.selected, b.mailbox = client, selected, mailbox
 	return nil
+}
+
+// allMailbox picks the mailbox to read when the configuration names none:
+// the one that holds every message. Reading only the inbox would make
+// archived mail look as if it did not exist.
+//
+// A server marks that mailbox with the \All attribute. Failing that, the
+// name "All Mail" is tried, with or without a parent such as "[Gmail]".
+// A server with neither gets INBOX.
+func allMailbox(list []*imap.ListData) string {
+	selectable := func(m *imap.ListData) bool {
+		return !slices.Contains(m.Attrs, imap.MailboxAttrNoSelect) && !slices.Contains(m.Attrs, imap.MailboxAttrNonExistent)
+	}
+	for _, m := range list {
+		if selectable(m) && slices.Contains(m.Attrs, imap.MailboxAttrAll) {
+			return m.Mailbox
+		}
+	}
+	for _, m := range list {
+		name := m.Mailbox
+		if m.Delim != 0 {
+			name = name[strings.LastIndex(name, string(m.Delim))+1:]
+		}
+		if selectable(m) && strings.EqualFold(name, "All Mail") {
+			return m.Mailbox
+		}
+	}
+	return "INBOX"
 }

@@ -44,7 +44,7 @@ func parseConfig(args []string) (config, error) {
 	fs.StringVar(&opts.user, "imap-user", "", "IMAP user name")
 	fs.StringVar(&opts.passwordFile, "imap-password-file", "", "file holding the IMAP password, readable only by its owner")
 	fs.StringVar(&opts.caFile, "imap-ca-file", "", "PEM certificate to trust instead of the system's, for a server with a self-signed one")
-	fs.StringVar(&opts.mailbox, "imap-mailbox", "INBOX", "mailbox to read")
+	fs.StringVar(&opts.mailbox, "imap-mailbox", "", "mailbox to read (default: the server's all-mail mailbox, or INBOX if it has none)")
 	check := fs.Bool("check", false, "log in to the IMAP server, print the mailbox's message count and exit")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -79,8 +79,6 @@ func parseConfig(args []string) (config, error) {
 		return config{}, errors.New("--mailpit-url and --imap-addr select different back ends; give one")
 	case opts.user == "" || opts.passwordFile == "":
 		return config{}, errors.New("--imap-addr needs --imap-user and --imap-password-file")
-	case opts.mailbox == "":
-		return config{}, errors.New("--imap-mailbox is empty")
 	case *tlsMode != "implicit" && *tlsMode != "starttls":
 		return config{}, fmt.Errorf("invalid --imap-tls %q: use implicit or starttls", *tlsMode)
 	}
