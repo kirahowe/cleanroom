@@ -29,11 +29,6 @@ func TestMain(m *testing.M) {
 		fakeUpstream()
 	case "reader":
 		fakeReader()
-	case "blocked-command":
-		os.Exit(withSignals(func(context.Context) int {
-			fmt.Println("waiting")
-			select {} // stand in for a dependency that ignores cancellation
-		}))
 	default:
 		os.Exit(m.Run())
 	}

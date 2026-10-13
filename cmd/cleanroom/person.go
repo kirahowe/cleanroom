@@ -150,7 +150,7 @@ func approveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		line, err := c.input.ReadLine()
 		if err != nil || strings.TrimSpace(line) != strconv.Itoa(seq) {
 			fmt.Fprintln(c.stdout, "Cancelled. The call is still held.")
-			return nil
+			return err
 		}
 
 		children, err := st.childLog()

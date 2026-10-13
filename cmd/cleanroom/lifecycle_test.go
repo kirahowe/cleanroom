@@ -1,71 +1,59 @@
 package main
 
 import (
-	"bufio"
-	"context"
-	"errors"
-	"os"
-	"os/exec"
+	"syscall"
 	"testing"
-	"time"
 )
 
-func TestInterruptible(t *testing.T) {
-	t.Run("normal exit", func(t *testing.T) {
-		if got := interruptible(context.Background(), func() int { return 7 }); got != 7 {
-			t.Fatalf("exit %d, want 7", got)
+func TestOnSignal(t *testing.T) {
+	const background, running = false, false
+	const foreground, stopping = true, true
+	for _, tc := range []struct {
+		name                 string
+		foreground, stopping bool
+		sig                  syscall.Signal
+		want                 signalAction
+	}{
+		{"the first signal cancels the command", background, running, syscall.SIGINT, cancelCommand},
+		{"SIGTERM cancels like Ctrl-C", background, running, syscall.SIGTERM, cancelCommand},
+		{"a second signal ends the process", background, stopping, syscall.SIGINT, exitNow},
+		{"Ctrl-C belongs to a foreground command's child", foreground, running, syscall.SIGINT, ignoreSignal},
+		{"and still does while the command is stopping", foreground, stopping, syscall.SIGINT, ignoreSignal},
+		{"SIGTERM cancels a foreground command", foreground, running, syscall.SIGTERM, cancelCommand},
+		{"a second SIGTERM ends a foreground command", foreground, stopping, syscall.SIGTERM, exitNow},
+	} {
+		if got := onSignal(tc.foreground, tc.stopping, tc.sig); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
 		}
-	})
-	t.Run("cancelled before start", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if got := interruptible(ctx, func() int { t.Error("started after cancellation"); return 0 }); got != 130 {
-			t.Fatalf("exit %d, want 130", got)
-		}
-	})
-	t.Run("waits for cleanup", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		cleaned := make(chan struct{})
-		code := interruptible(ctx, func() int {
-			defer close(cleaned)
-			cancel()
-			return 0
-		})
-		if code != 130 {
-			t.Fatalf("exit %d, want 130", code)
-		}
-		select {
-		case <-cleaned:
-		default:
-			t.Fatal("exited before cleanup")
-		}
-	})
+	}
 }
 
-// A real SIGINT must stop even a command that never observes its context.
-func TestInterruptStopsBlockedCommand(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0])
-	cmd.Env = append(os.Environ(), "CLEANROOM_TEST_AS=blocked-command")
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
+func TestExitStatus(t *testing.T) {
+	const finished, abandoned = true, false
+	for _, tc := range []struct {
+		name            string
+		finished        bool
+		code            int
+		sig             syscall.Signal
+		want            int
+		wantInterrupted bool
+	}{
+		{"no signal", finished, 1, 0, 1, false},
+		{"completed despite the signal", finished, 0, syscall.SIGINT, 0, false},
+		{"failed for its own reasons after the signal", finished, 2, syscall.SIGINT, 2, false},
+		{"cut short by Ctrl-C", finished, exitInterrupted, syscall.SIGINT, 130, true},
+		{"cut short by SIGTERM", finished, exitInterrupted, syscall.SIGTERM, 143, true},
+		{"ignored the signal for the whole grace period", abandoned, 0, syscall.SIGTERM, 143, true},
+	} {
+		status, interrupted := exitStatus(tc.finished, tc.code, tc.sig)
+		if status != tc.want || interrupted != tc.wantInterrupted {
+			t.Errorf("%s: got %d, %v; want %d, %v", tc.name, status, interrupted, tc.want, tc.wantInterrupted)
+		}
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer cmd.Process.Kill()
-	if line, err := bufio.NewReader(out).ReadString('\n'); err != nil || line != "waiting\n" {
-		t.Fatalf("command did not start: %q, %v", line, err)
-	}
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Fatal(err)
-	}
-	err = cmd.Wait()
-	var exit *exec.ExitError
-	if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 130 {
-		t.Fatalf("interrupt: %v, context: %v; want exit 130", err, ctx.Err())
+}
+
+func TestForeground(t *testing.T) {
+	if !foreground([]string{"claude", "--resume", "x"}) || foreground([]string{"ask", "claude"}) || foreground(nil) {
+		t.Error("claude, and only claude, is a foreground command")
 	}
 }

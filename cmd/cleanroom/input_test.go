@@ -50,3 +50,22 @@ func runCancelledPrompt(t *testing.T, prefix string, args ...string) string {
 	}
 	return out.String()
 }
+
+func TestEntered(t *testing.T) {
+	broken := errors.New("broken terminal")
+	for _, tc := range []struct {
+		line    string
+		err     error
+		want    string
+		wantErr error
+	}{
+		{"yes\n", nil, "yes\n", nil},
+		{"yes", io.EOF, "", nil},
+		{"", io.EOF, "", nil},
+		{"ye", broken, "ye", broken},
+	} {
+		if got, err := entered(tc.line, tc.err); got != tc.want || err != tc.wantErr {
+			t.Errorf("entered(%q, %v) = %q, %v; want %q, %v", tc.line, tc.err, got, err, tc.want, tc.wantErr)
+		}
+	}
+}

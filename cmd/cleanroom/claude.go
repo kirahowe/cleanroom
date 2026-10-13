@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"syscall"
 
 	"cleanroom/internal/config"
 )
@@ -61,6 +62,11 @@ func claudeCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 
 		cmd := exec.CommandContext(ctx, *claude, claudeSessionArgs(serveArgv(self, policyFlag, stateDir), id, *resume != "")...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = c.stdin, c.stdout, c.stderr
+		// Ctrl-C belongs to the conversation, which uses it to interrupt
+		// a reply. This is a foreground command, so ctx ends only when
+		// cleanroom itself is told to terminate, and the conversation is
+		// then asked to do the same.
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("could not start Claude Code: %w", err)
 		}

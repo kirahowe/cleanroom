@@ -58,7 +58,7 @@ func mainCode() int {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		return string(b), err
 	}
-	return withSignals(func(ctx context.Context) int {
+	return withSignals(foreground(os.Args[1:]), func(ctx context.Context) int {
 		return run(ctx, os.Args[1:], stdio{
 			stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 			terminal: terminal, readPassword: readPassword,
@@ -89,6 +89,12 @@ var commands = []command{
 	{"log", "list every event", logCommand},
 	{"explain", "replay the decision made about a call: explain N", explainCommand},
 	{"repair", "set aside a last log line that a crash cut off", repairCommand},
+}
+
+// foreground reports whether the arguments name a command that hands the
+// terminal to a child for as long as it runs. See withSignals.
+func foreground(args []string) bool {
+	return len(args) > 0 && args[0] == "claude"
 }
 
 type stdio struct {
@@ -209,7 +215,7 @@ func run(ctx context.Context, args []string, sio stdio) int {
 		return 2
 	}
 
-	c := &common{stdio: sio, input: commandInput{ctx, bufio.NewReader(sio.stdin)}}
+	c := &common{stdio: sio, input: commandInput{ctx, bufio.NewReader(sio.stdin), sio.readPassword}}
 	fs := flag.NewFlagSet("cleanroom "+cmd.name, flag.ContinueOnError)
 	fs.SetOutput(sio.stderr)
 	fs.StringVar(&c.policyPath, "policy", "", "path to the policy file (default: ~/.config/cleanroom/policy.jsonc)")
@@ -222,12 +228,13 @@ func run(ctx context.Context, args []string, sio stdio) int {
 		return 2
 	}
 	err := runCmd(ctx)
-	if ctx.Err() != nil {
-		return 130
+	switch {
+	case err == nil:
+		return 0
+	case ctx.Err() != nil:
+		// Whatever a cancelled command failed with, the signal is why.
+		return exitInterrupted
 	}
-	if err != nil {
-		fmt.Fprintf(sio.stderr, "cleanroom %s: %v\n", cmd.name, err)
-		return 1
-	}
-	return 0
+	fmt.Fprintf(sio.stderr, "cleanroom %s: %v\n", cmd.name, err)
+	return 1
 }

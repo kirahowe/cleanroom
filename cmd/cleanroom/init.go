@@ -127,7 +127,10 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			"it reads, including headers and message text, is sent to Anthropic in the\n"+
 			"process.\n\nProceed? [y/N]: ")
 		consent, err := c.input.ReadLine()
-		if err != nil || !slices.Contains([]string{"y", "yes"}, strings.ToLower(strings.TrimSpace(consent))) {
+		if err != nil {
+			return err
+		}
+		if !slices.Contains([]string{"y", "yes"}, strings.ToLower(strings.TrimSpace(consent))) {
 			return errors.New("setup cancelled; mail access was not enabled and nothing was written")
 		}
 		if s.user == "" {
@@ -141,7 +144,7 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			}
 		}
 		fmt.Fprint(c.stdout, "IMAP password (not shown): ")
-		password, err := c.readPassword()
+		password, err := c.input.ReadPassword()
 		fmt.Fprintln(c.stdout)
 		if err != nil {
 			return err
@@ -151,6 +154,8 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		}
 
 		dir := filepath.Dir(policyPath)
+		_, statErr := os.Stat(dir)
+		madeDir := errors.Is(statErr, os.ErrNotExist)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
@@ -161,6 +166,9 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		check, err := exec.CommandContext(ctx, s.mailSource, append([]string{"--check"}, s.mailSourceArgs()...)...).CombinedOutput()
 		if err != nil {
 			os.Remove(s.passwordFile)
+			if madeDir {
+				os.Remove(dir)
+			}
 			return fmt.Errorf("could not open the mailbox, so nothing was written:\n%s", strings.TrimSpace(string(check)))
 		}
 		if err := writePrivate(policyPath, starterPolicy(s)); err != nil {
