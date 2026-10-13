@@ -18,9 +18,10 @@ func TestAskFromTheCommandLine(t *testing.T) {
 		t.Errorf("got %v:\n%s", ok, out)
 	}
 
-	// At a terminal: the screen a person reads.
-	out, ok = runCLI(t, true, "", "ask", "--policy", policy, "--returns", "number", "How many tools can you see?")
-	if !ok || !strings.Contains(out, "How many tools can you see?") || !strings.Contains(out, "Answer (a checked value): 1") {
+	// At a terminal: the screen a person reads. Flags count after the
+	// question too, and stay out of it.
+	out, ok = runCLI(t, true, "", "ask", "How many tools can you see?", "--policy", policy, "--returns", "number")
+	if !ok || !strings.Contains(out, "│ How many tools can you see?\n") || !strings.Contains(out, "Answer (a checked value): 1") {
 		t.Errorf("got %v:\n%s", ok, out)
 	}
 
@@ -46,6 +47,10 @@ func TestAskRefusals(t *testing.T) {
 		"no question":    {[]string{"--returns", "date"}, "give the question"},
 		"unknown type":   {[]string{"--returns", "poem", "Write one"}, "REFUSED"},
 		"unknown source": {[]string{"--source", "nowhere", "Anything?"}, "REFUSED"},
+		// A mistyped flag after the question is an error. It is not
+		// asked as part of the question.
+		"unknown flag after the question": {[]string{"Anything?", "--response", "boolean"}, "flag provided but not defined: -response"},
+		"bad type after the question":     {[]string{"Write one", "--returns", "poem"}, "REFUSED"},
 	} {
 		out, ok := runCLI(t, false, "", append([]string{"ask", "--policy", policy}, tc.args...)...)
 		if ok || !strings.Contains(out, tc.want) {

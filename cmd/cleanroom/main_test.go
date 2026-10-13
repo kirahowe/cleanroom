@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -393,5 +396,36 @@ func TestUsageErrors(t *testing.T) {
 		if err := cmd.Run(); err == nil {
 			t.Errorf("cleanroom %v exited 0, want an error", args)
 		}
+	}
+}
+
+func TestParseAnywhere(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string
+		returns string
+		rest    []string
+	}{
+		"flags first":      {[]string{"--returns", "date", "When?"}, "date", []string{"When?"}},
+		"flags last":       {[]string{"When?", "--returns", "date"}, "date", []string{"When?"}},
+		"flags between":    {[]string{"When", "--returns=date", "is", "it?"}, "date", []string{"When", "is", "it?"}},
+		"after the dashes": {[]string{"--returns", "date", "--", "--returns", "x"}, "date", []string{"--returns", "x"}},
+		"dashes later":     {[]string{"What", "is", "--", "--returns", "?"}, "text", []string{"What", "is", "--returns", "?"}},
+		"no arguments":     {nil, "text", nil},
+	} {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		returns := fs.String("returns", "text", "")
+		if err := parseAnywhere(fs, tc.args); err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if *returns != tc.returns || !slices.Equal(fs.Args(), tc.rest) {
+			t.Errorf("%s: returns %q and arguments %q, want %q and %q", name, *returns, fs.Args(), tc.returns, tc.rest)
+		}
+	}
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := parseAnywhere(fs, []string{"When?", "--response", "boolean"}); err == nil {
+		t.Errorf("an unknown flag after an argument was accepted, leaving %q", fs.Args())
 	}
 }

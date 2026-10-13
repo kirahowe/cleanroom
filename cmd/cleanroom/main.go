@@ -210,6 +210,33 @@ func usageText() string {
 
 // run is the only place here that writes: it picks the command, runs it,
 // and turns the outcome into output and an exit code.
+// parseAnywhere parses flags wherever they stand among the arguments, so
+// "ask QUESTION --returns date" means what "ask --returns date QUESTION"
+// does. The flag package alone stops at the first argument that is not a
+// flag and leaves the rest as arguments. For ask that turned a flag after
+// the question into part of the question, and a mistyped one with it.
+//
+// After "--" nothing is a flag, which is how to pass an argument that
+// starts with a dash. fs.Args() returns the arguments that were not flags.
+func parseAnywhere(fs *flag.FlagSet, args []string) error {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		rest := fs.Args()
+		if consumed := len(args) - len(rest); consumed > 0 && args[consumed-1] == "--" {
+			positional = append(positional, rest...)
+			break
+		}
+		if len(rest) == 0 {
+			break
+		}
+		positional, args = append(positional, rest[0]), rest[1:]
+	}
+	return fs.Parse(append([]string{"--"}, positional...))
+}
+
 func run(ctx context.Context, args []string, sio stdio) int {
 	if len(args) == 0 {
 		fmt.Fprint(sio.stderr, usageText())
@@ -231,7 +258,7 @@ func run(ctx context.Context, args []string, sio stdio) int {
 	fs.StringVar(&c.policyPath, "policy", "", "path to the policy file (default: ~/.config/cleanroom/policy.jsonc)")
 	fs.StringVar(&c.stateDir, "state", "", "state directory (default: .cleanroom next to the policy)")
 	runCmd := cmd.setup(fs, c)
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := parseAnywhere(fs, args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
