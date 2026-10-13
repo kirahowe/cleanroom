@@ -55,7 +55,6 @@ func main() {
 
 var client = &http.Client{Timeout: 5 * time.Second}
 
-// checkMailpit confirms that the HTTP address answers as Mailpit does.
 func checkMailpit(api string) error {
 	resp, err := client.Get(api + "/api/v1/info")
 	if err != nil {

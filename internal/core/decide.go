@@ -26,8 +26,7 @@ func (v Verdict) valid() bool { return v == Run || v == Hold || v == Refuse }
 // call it is about.
 type Decision struct {
 	Verdict Verdict `json:"verdict"`
-	// Class is the class the call was judged under.
-	Class Class `json:"class,omitempty"`
+	Class   Class   `json:"class,omitempty"`
 	// Reasons explain the verdict and cite the events it rests on.
 	Reasons []Reason `json:"reasons"`
 	// Gains is what the session takes on when the call takes effect.

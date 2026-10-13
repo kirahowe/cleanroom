@@ -50,7 +50,6 @@ func call(t *testing.T, cs *mcp.ClientSession, tool string, args any, out any) *
 	return res
 }
 
-// text returns the text of a tool result.
 func text(res *mcp.CallToolResult) string {
 	out := ""
 	for _, c := range res.Content {

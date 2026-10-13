@@ -28,7 +28,6 @@ const (
 // ErrInvalid marks errors caused by bad caller input.
 var ErrInvalid = errors.New("invalid input")
 
-// EventInput is the data needed to create an event.
 type EventInput struct {
 	Title       string `json:"title" jsonschema:"Event title, 1 to 200 characters."`
 	Date        string `json:"date" jsonschema:"First day of the all-day event, formatted YYYY-MM-DD."`
@@ -37,7 +36,6 @@ type EventInput struct {
 	Description string `json:"description,omitempty" jsonschema:"Longer notes about the event, up to 2000 characters."`
 }
 
-// Event is a calendar event as returned to callers.
 type Event struct {
 	UID         string `json:"uid" jsonschema:"Unique event id."`
 	Title       string `json:"title"`
@@ -53,14 +51,12 @@ type storedEvent struct {
 	Created time.Time `json:"created"`
 }
 
-// ReminderInput is the data needed to create a reminder.
 type ReminderInput struct {
 	Title string `json:"title" jsonschema:"Reminder title, 1 to 200 characters."`
 	Due   string `json:"due" jsonschema:"Due date, formatted YYYY-MM-DD."`
 	Note  string `json:"note,omitempty" jsonschema:"Extra detail, up to 2000 characters."`
 }
 
-// Reminder is a reminder as stored and returned.
 type Reminder struct {
 	ID    string `json:"id" jsonschema:"Unique reminder id."`
 	Title string `json:"title"`
@@ -109,7 +105,6 @@ func (s *Store) lock() (unlock func(), err error) {
 	}, nil
 }
 
-// newStore creates dir if needed and returns a Store using it.
 func newStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -117,10 +112,8 @@ func newStore(dir string) (*Store, error) {
 	return &Store{dir: dir, now: time.Now, newID: randomID}, nil
 }
 
-// ICSPath is the location of the generated calendar file.
 func (s *Store) ICSPath() string { return filepath.Join(s.dir, icsFile) }
 
-// RemindersPath is the location of the reminders file.
 func (s *Store) RemindersPath() string { return filepath.Join(s.dir, remindersFile) }
 
 // CreateEvent validates in, stores the event, and rewrites calendar.ics.

@@ -1,13 +1,8 @@
-// Package typed checks a reader's answer against the type the caller asked
-// for.
+// Package typed validates reader answers against the caller's requested type.
 //
-// This is the narrow gate of the whole design. A reader is assumed to be
-// compromised by what it read, so nothing it produces is passed on as it is.
-// Check accepts an answer only if it has the requested shape, and returns a
-// value that cleanroom serialises itself. Every byte the caller receives
-// therefore comes from a small fixed grammar (digits, dates, true and false,
-// currency codes from a list) or from strings the caller supplied (choices and
-// field names). None of that can carry an instruction.
+// Check returns a value for cleanroom to serialise. Output is restricted to
+// the type's grammar and caller-supplied choices and field names. Validation
+// checks structure, not accuracy.
 //
 // The package is pure: no I/O, no clock, no globals that change.
 package typed

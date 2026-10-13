@@ -85,8 +85,6 @@ func classNote(class core.Class, t core.Tool) string {
 	return ""
 }
 
-// discardNote is added to the description of a tool whose result cleanroom
-// drops.
 const discardNote = " Cleanroom discards this tool's output: you are told only whether it ran."
 
 // callTool is the path every upstream call takes: decide and record, then

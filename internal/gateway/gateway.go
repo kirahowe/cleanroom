@@ -27,15 +27,13 @@ import (
 // Gateway serves one session. All of its fields are fixed once it is
 // built. What changes over time lives in the event log.
 type Gateway struct {
-	// Policy is the trusted configuration.
 	Policy core.Policy
 	// Log is the event log shared with every other cleanroom process.
 	Log *eventlog.Log
 	// Session identifies the conversation this gateway serves. Whoever
 	// launches the server chooses it, and a conversation that is resumed
 	// under the same id gets its history back from the log.
-	Session string
-	// Upstreams are the MCP servers behind the gateway.
+	Session   string
 	Upstreams *upstream.Set
 	// Readers answers questions about sources, by source name.
 	Readers map[string]reader.Reader

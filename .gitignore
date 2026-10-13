@@ -15,3 +15,7 @@
 
 # Worktrees made by coding agents.
 /.claude/
+
+# Working notes from building cleanroom. They stay local.
+/PLAN.md
+/DESIGN.md

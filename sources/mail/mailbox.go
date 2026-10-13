@@ -14,7 +14,6 @@ type Mailbox interface {
 	Read(ctx context.Context, id string) (Message, error)
 }
 
-// Summary is one search hit.
 type Summary struct {
 	ID      string   `json:"id" jsonschema:"message ID to pass to the read tool"`
 	From    string   `json:"from" jsonschema:"sender address"`
@@ -24,7 +23,6 @@ type Summary struct {
 	Snippet string   `json:"snippet" jsonschema:"short excerpt of the body"`
 }
 
-// Message is one full message.
 type Message struct {
 	ID      string   `json:"id" jsonschema:"message ID"`
 	From    string   `json:"from" jsonschema:"sender address"`

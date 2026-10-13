@@ -53,8 +53,7 @@ type Command struct {
 	// A bare "{question}" would let a question that starts with a dash
 	// be read as an option of the reader program.
 	Argv []string
-	// Dir is the working directory for the command.
-	Dir string
+	Dir  string
 	// Pipe is the command that joins its stdin and stdout to a unix
 	// socket: the cleanroom binary and "reader-tools". The socket's path
 	// is appended for each job.

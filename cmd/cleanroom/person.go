@@ -280,7 +280,6 @@ func repairCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	}
 }
 
-// read opens the state and reads the whole log.
 func (c *common) read() (*state, []core.Event, error) {
 	st, err := c.open()
 	if err != nil {
@@ -290,7 +289,6 @@ func (c *common) read() (*state, []core.Event, error) {
 	return st, events, err
 }
 
-// numberArg returns the single event number given after the flags.
 func numberArg(fs *flag.FlagSet) (int, error) {
 	if fs.NArg() != 1 {
 		return 0, fmt.Errorf("give one number, as in: %s 12", fs.Name())

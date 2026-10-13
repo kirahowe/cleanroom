@@ -1,11 +1,7 @@
-// Package reader runs readers: the disposable sessions that read a source
-// on a caller's behalf and answer one question.
+// Package reader runs disposable sessions that answer questions about a source.
 //
-// A reader is assumed to be compromised by what it reads. Nothing here
-// tries to make a reader behave. The package only starts one, hands it the
-// tools of a single source, and returns whatever it printed. What a reader
-// can reach is limited by core.Decide, and what it says is checked by
-// core.Conclude.
+// Readers are treated as compromised. core.Decide restricts tool access to
+// one source; core.Conclude validates the answer.
 package reader
 
 import (
@@ -20,8 +16,7 @@ type Job struct {
 	// Ask is the Seq of the ask in the event log.
 	Ask int
 	// Source is the upstream the reader may read.
-	Source string
-	// Question is the caller's question.
+	Source   string
 	Question string
 	// Returns is the type of answer wanted, as the caller gave it.
 	Returns json.RawMessage

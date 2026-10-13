@@ -12,9 +12,7 @@ import (
 	"cleanroom/internal/upstream"
 )
 
-// run plays the scenes in order. Scenes 1 to 4 are the product: questions
-// answered from an inbox the agent never reads. Scenes 5 and 6 show what
-// reading it costs.
+// run demonstrates typed queries, free-text delivery, contamination and approval.
 func (d *demo) run() {
 	a := d.startAgent()
 	d.tripCost(a)
@@ -112,8 +110,7 @@ func (d *demo) freeText(a *agent) int {
 	return res.ID
 }
 
-// optIn has the agent read the stored answer itself, which costs the
-// session its clean state for good.
+// optIn reads the stored text and contaminates the session.
 func (d *demo) optIn(a *agent, ask int) {
 	scene(5, "The agent opts in and reads that answer itself")
 	var res askResult
@@ -131,10 +128,8 @@ func (d *demo) optIn(a *agent, ask int) {
 	}
 }
 
-// heldEvents shows what the opt-in costs. The contaminated session tries
-// to create two calendar events: a reasonable one, and the one an injected
-// instruction would have it make. Both are held. The person denies one and
-// approves the other, which is created exactly once.
+// heldEvents checks that both actions are held after contamination, a denied
+// proposal cannot run, and an approved proposal runs once.
 func (d *demo) heldEvents(a *agent) {
 	scene(6, "After a restart, the contaminated session tries to change the calendar")
 	d.check(d.labels().Contaminated, "the restarted session did not come back clean")
@@ -213,7 +208,6 @@ func (d *demo) showToPerson(render func([]core.Event) (string, error)) {
 	fmt.Println()
 }
 
-// oneLine shortens a result for display.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > 150 {

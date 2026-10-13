@@ -14,7 +14,6 @@ import (
 	"cleanroom/internal/reader"
 )
 
-// defaultReaderTimeout is how long a reader gets to answer one question.
 const defaultReaderTimeout = 3 * time.Minute
 
 const askDescription = `Ask a question about a source you cannot read yourself, such as the user's inbox. A separate, disposable reader does the reading. You receive only the answer, in the type you ask for, so nothing in the source can give you instructions.

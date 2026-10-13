@@ -239,7 +239,6 @@ func AskAt(log []Event, seq int) (*Decided, bool) {
 	return c, true
 }
 
-// callAt returns the call recorded at seq, if there is one.
 func callAt(log []Event, seq int) (*Decided, bool) {
 	if seq < 1 || seq > len(log) || log[seq-1].Kind != KindCall {
 		return nil, false

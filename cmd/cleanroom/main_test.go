@@ -119,7 +119,6 @@ func fakeReader() {
 	fmt.Printf(`{"answer": %d}`+"\n", answer)
 }
 
-// cleanroom returns a command that runs the cleanroom binary with args.
 func cleanroom(t *testing.T, args ...string) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)

@@ -52,12 +52,12 @@ func main() {
 	os.Exit(run(ctx, os.Args[1:], stdio{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, terminal: terminal}))
 }
 
-// command is one subcommand. It registers its flags on fs and returns the
-// function to run once they are parsed.
 type command struct {
 	name    string
 	summary string
-	setup   func(fs *flag.FlagSet, c *common) func(ctx context.Context) error
+	// setup registers the command's flags on fs and returns the function
+	// to run once they are parsed.
+	setup func(fs *flag.FlagSet, c *common) func(ctx context.Context) error
 }
 
 var commands = []command{
@@ -73,7 +73,6 @@ var commands = []command{
 	{"repair", "set aside a last log line that a crash cut off", repairCommand},
 }
 
-// stdio is where a command reads and writes.
 type stdio struct {
 	stdin          io.Reader
 	stdout, stderr io.Writer
@@ -82,18 +81,15 @@ type stdio struct {
 	terminal bool
 }
 
-// common holds what every command needs.
 type common struct {
 	stdio
 	policyPath string
 	stateDir   string
 }
 
-// state is a loaded policy and the open log that goes with it.
 type state struct {
 	cfg *config.Config
-	// dir is the absolute path of the state directory.
-	dir string
+	dir string // absolute
 	log *eventlog.Log
 }
 
@@ -138,8 +134,6 @@ func (c *common) open() (*state, error) {
 	return &state{cfg: cfg, dir: dir, log: elog}, nil
 }
 
-// childLogName is the file in the state directory that collects what
-// upstream servers and readers write to stderr.
 const childLogName = "children.log"
 
 // childLog opens the file that collects the stderr of the processes

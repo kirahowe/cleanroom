@@ -100,7 +100,6 @@ func (w *world) resolve(seq int, approve bool) error {
 	return nil
 }
 
-// rec returns the call recorded at seq.
 func (w *world) rec(seq int) Decided { return *w.log[seq-1].Call }
 
 func (w *world) labels(session string) Labels { return StateOf(w.p, w.log, session).Labels }

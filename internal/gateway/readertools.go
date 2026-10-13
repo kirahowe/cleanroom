@@ -25,7 +25,6 @@ type readerTools struct {
 	source  string
 }
 
-// forReader returns the tools for the reader of the ask at askSeq.
 func (g *Gateway) forReader(askSeq int, source string) readerTools {
 	return readerTools{g: g, session: core.ReaderSession(askSeq), source: source}
 }

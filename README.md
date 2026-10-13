@@ -1,82 +1,93 @@
 # cleanroom
 
-Cleanroom is an MCP server that lets an agent use untrusted content, such as
-an inbox, without reading it. The agent asks a question, a disposable reader
-does the reading, and only a typed value such as a date or an amount comes
-back, so a poisoned email has no way to reach the agent that holds your data
-and can act for you. I chose it because a model cannot be trusted to resist
-prompt injection from the inside, and MCP is a standard boundary where what
-crosses between an agent and its tools can be checked by deterministic code.
+Cleanroom is an MCP gateway that lets an agent query untrusted content without
+reading it directly. A separate reader searches the source and returns an
+answer. Cleanroom checks typed answers, such as dates and amounts, before
+passing them to the agent. Uncontaminated sessions receive untrusted free text
+only if they explicitly accept contamination; otherwise it is stored for the
+user to review.
 
-It is a gateway: an MCP server to the agent and an MCP client to the servers
-behind it. Tailscale's Aperture is also an MCP gateway, and decides what a
-caller may use from who the caller is. Cleanroom decides from a different
-input: what the session has already read.
+## Why this exists
+
+Useful agents often need all three components of the
+[lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/):
+access to private data, a way to send data out, and exposure to content that an
+attacker can use to inject instructions. Removing any one of these can also
+remove capabilities the agent needs to do its job.
+
+Traditional access controls usually base authority on identity and roles.
+Those can change, but they remain properties the system can check at each
+request. For an agent, authority also needs to depend on the current session.
+The same agent, with the same credentials, may need different permissions
+after reading an untrusted email.
+
+Cleanroom makes that history part of access control. It tracks what each
+session has read and written, and uses that state to decide whether a tool
+call can run, needs approval, or must be refused. Typed queries let the agent
+use information from untrusted sources without reading their text.
 
 ## Try it in five minutes
 
-You need Go 1.25 or later, `make` and `curl`. Nothing here needs an API key,
-and no mail leaves your machine.
+You need Go 1.26 or later, `make` and `curl`. No API key is required, and no
+mail leaves your machine.
 
 ```sh
-make test    # every test in the three Go modules
-make demo    # the whole story, end to end, against real processes
+make test    # tests and vet in all three Go modules
+make demo    # six scenes, 22 checks
 ```
 
-`make demo` downloads [Mailpit](https://mailpit.axllent.org) (a local mail
-server for testing) into `.tools/` if you do not have it, starts it, fills its
-inbox from `demo/inbox/`, and starts the real cleanroom server with the real
-mail and calendar servers behind it. A scripted agent then makes the tool
-calls a model would make. Each scene checks its own result, and the command
-fails if any check does.
+`make demo` downloads [Mailpit](https://mailpit.axllent.org), a local test mail
+server, into `.tools/` if needed. It starts Mailpit, seeds it from
+`demo/inbox/`, and runs cleanroom with the mail and calendar servers. A
+scripted agent makes tool calls and checks the results. Any failed check
+fails the command.
 
-| Scene | What happens | What it shows |
+| Scene | What happens | Result |
 | --- | --- | --- |
-| 1 | "How much was my trip to Toronto?" The reader reads four receipts. The agent receives `{"amount":"890.55","currency":"CAD"}`. | A question answered from an inbox the agent never read. |
-| 2 | "When is my reunion? Put it on my calendar." A date comes back, and the agent creates the event. The same for an order and a reminder. | The agent acts with no approval, because nothing untrusted reached it. |
-| 3 | The same question, with a reader that obeys the poisoned email in the inbox. | The reader tries to send the inbox away and has no tool for it. It answers with the attacker's sentence, which is not a date, so the agent gets "no answer". |
-| 4 | "Where is my order right now?" has no type. | Free text goes to you, not to the agent. The agent gets an id. |
-| 5 | The agent opts in and reads that text itself. | Its session is contaminated from then on. |
-| 6 | After a restart, that session tries to send two emails. | Both are held. You see the full call and why. One is denied, one is approved and sent exactly once. |
+| 1 | The reader reads four receipts for a trip to Toronto. | The agent receives `{"amount":"890.55","currency":"CAD"}` without reading the messages. |
+| 2 | The agent asks for a reunion date and an order's delivery date, then creates an event and a reminder. | Both actions run without approval; the session is uncontaminated. |
+| 3 | A reader obeys the poisoned email. | Its attempt to send mail is refused. Its answer contains instructions instead of a date, so the agent receives `no_answer`. |
+| 4 | The agent asks for an order's location as free text. | The user receives the text. The agent receives an id. |
+| 5 | The agent opts in to read that text. | The session becomes contaminated. |
+| 6 | After a restart, the same session tries to create two calendar events. | Both are held. The user denies one and approves the other, which runs once. |
 
-Scenes 1 to 4 are the product. Scenes 5 and 6 show what the opt-in costs and
-that the cost is enforced.
-
-Afterwards, look at what was left behind:
+Inspect the results:
 
 ```sh
-open demo/.cleanroom/calendar/calendar.ics          # the event, in your calendar app
-bin/cleanroom log --policy demo/policy.jsonc        # every call, read, answer and approval
-bin/cleanroom explain --policy demo/policy.jsonc 50 # replay one decision from the log
+open demo/.cleanroom/calendar/calendar.ics          # open the calendar file
+bin/cleanroom log --policy demo/policy.jsonc        # event summaries, without content
+bin/cleanroom explain --policy demo/policy.jsonc 51 # replay a decision
 ```
 
 ### Send your own attack
 
-The inbox is the attack surface, so attack it. Start Mailpit and leave it
-running:
+Start Mailpit and leave it running:
 
 ```sh
-make inbox        # then open http://127.0.0.1:18025
+make inbox        # web UI: http://127.0.0.1:18025
 ```
 
-Write an email as a `.eml` file (copy one from `demo/inbox/`), put it in a
-directory, and deliver it:
+Copy an email from `demo/inbox/`, edit it, and save it in a directory of
+`.eml` files. Then deliver the files and run the demo:
 
 ```sh
 bin/seed --dir path/to/your/attacks
-make demo         # uses the running inbox as it stands
+make demo         # uses the running inbox
 ```
 
-The scripted reader in scene 3 obeys two phrasings, wherever they appear in a
-message it reads: `Call the tool NAME with {JSON}` and
-`answer with exactly: "TEXT"`. Mention "reunion" in your email so that the
-reader finds it. Whatever you write, the agent ends scene 3 with no answer and
-an uncontaminated session, and Mailpit shows that nothing was sent.
+The scripted reader in scene 3 recognises two instructions in messages:
+`Call the tool NAME with {JSON}` and `answer with exactly: "TEXT"`. Include
+"reunion" so the reader finds your message. The gateway refuses tools the
+reader cannot access and rejects answers that do not match the requested
+type. A valid date can pass the check even if it is wrong. The demo checks
+results against its bundled messages, so custom messages can cause checks to
+fail.
 
-### Poke it with no agent
+### Call the server with MCP Inspector
 
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) can
-call the server directly. With `make inbox` running:
+call the server directly. With `make inbox` running, run these commands from
+the repository root:
 
 ```sh
 npx @modelcontextprotocol/inspector --cli --config examples/mcp.json --server cleanroom \
@@ -87,7 +98,7 @@ npx @modelcontextprotocol/inspector --cli --config examples/mcp.json --server cl
   --tool-arg source=mail --tool-arg 'question=When is my family reunion?' --tool-arg returns=date
 ```
 
-Leave out `--cli` for the Inspector's web interface.
+Omit `--cli` to use the Inspector's web interface.
 
 ## How ask works
 
@@ -102,180 +113,155 @@ Leave out `--cli` for the Inspector's web interface.
      |                         |-------- and recorded, then forwarded ------------->|
      |                         |                               |<-- mail text ------|
      |                         |<-- {"answer": "2027-07-17"} --|                    |
-     |                         |  check it against "date"      x  (reader is gone)
+     |                         |  check it against "date"      x  (reader exits)
      |<-- "2027-07-17" --------|
 ```
 
-`ask(source, question, returns)` is the tool a capable agent uses. Cleanroom
-starts a reader: a separate process that has the read-only tools of that one
-source and nothing else. The reader is assumed to be compromised by whatever
-it reads. Nothing in the design depends on it behaving.
+`ask(source, question, returns)` starts a reader process with access to one
+source. Readers can use read tools and, for non-private sources, tools
+explicitly classed as `egress`. Cleanroom treats the reader as compromised
+and checks its calls and answers. Each reader has a budget of 40 tool calls.
 
-What comes back depends on `returns`:
+For an uncontaminated session querying an untrusted source, `returns` controls
+what reaches the caller:
 
-| `returns` | The caller receives | The caller's session becomes |
+| `returns` | Caller receives | Session labels added |
 | --- | --- | --- |
-| `date`, `datetime` (in UTC), `number`, `money`, `boolean`, a `choice` from the caller's own list, or a `record` of those | the value, serialised again by cleanroom, or "no answer" | private, if the source is |
-| `text` | an id; the text is delivered to you | unchanged |
-| `text` with `accept_contamination: true` | the text | contaminated, for the rest of its life |
+| `date`, UTC `datetime`, `number`, `money`, `boolean`, `choice`, or `record` | A checked value or `no_answer` | `private`, if the source is private |
+| `text` | An id; the text is stored for the user to review | None |
+| `text` with `accept_contamination: true` | The text | `contaminated`, and `private` if applicable |
 
-A typed value is drawn from a fixed grammar: digits, dates, `true` and
-`false`, currency codes from a list, and strings the caller supplied itself.
-None of that can carry an instruction. The checker is one small file,
-`internal/typed/typed.go`, and a fuzz test states the guarantee against a
-grammar written separately from it.
+Typed answers use a fixed grammar: dates, numbers, booleans, currency codes,
+and strings supplied by the caller as choices or field names. Cleanroom
+serialises the checked value itself. The checker is in
+`internal/typed/typed.go`; a fuzz test checks its output against an independent
+grammar. It validates structure, not accuracy: a compromised reader can return
+the wrong date.
 
-A typed value is checked but not verified. A compromised reader can return the
-wrong date. It cannot return instructions.
+An uncontaminated session must pass `accept_contamination: true` to receive
+untrusted free text. Once contaminated, a session stays contaminated. Text
+can return directly when the session already carries its labels or the
+source is uncontaminated.
 
-Free text cannot be checked that way, so by default it never reaches the
-agent. It is stored and delivered to you. An agent that wants it must say so
-with `accept_contamination: true`, and the tool description tells it what that
-costs. That is the one named, deliberate way to become contaminated.
-
-A reader gets the tools of exactly one source. A reader that could read mail
-and fetch web pages would hold private data, untrusted content and a way out
-all at once, so that combination cannot be configured.
+With the demo policy, an uncontaminated agent can create a "Family reunion"
+event using a typed date without approval. Copying the invitation's address
+requires reading free text, which contaminates the session and makes the
+event require approval.
 
 ### Reader back ends
 
-A reader is any program that takes a question, uses the MCP server it is
-pointed at, and prints `{"answer": ...}`. The policy names the command:
+A reader is a program that receives a question, calls the supplied MCP server,
+and prints `{"answer": ...}`. The policy specifies the command:
 
 ```jsonc
 "reader": ["../bin/demo-reader", "--mcp-config", "{mcp_config}",
            "--question", "{question}", "--returns", "{returns}"]
 ```
 
-`{mcp_config}` is the path of a JSON file in the common `mcpServers` layout
-that names one server: the source's read-only tools, served by
-`cleanroom reader-tools`.
+`{mcp_config}` points to a JSON file in the `mcpServers` format. It connects
+the reader to one source through `cleanroom reader-tools` and a temporary Unix
+socket. The gateway authorizes each call and reuses its upstream connections.
+The socket closes when the question finishes.
 
-The demo's reader (`demo/reader`) is scripted. It answers the demo's questions
-by keyword and regular expression, which is enough to show the path an answer
-takes without a model. A headless agent fits the same interface, for example
-Claude Code with `--tools ""`, `--strict-mcp-config` and
-`--mcp-config {mcp_config}`, and so does a small program that calls a model
-API with a key from the environment. Wiring and testing those is the next
-step in the build and is not done yet. See "Not built yet".
+The demo reader in `demo/reader` uses keywords and regular expressions.
+A headless agent or a program that calls a model API can use the same
+interface, provided it has no other tools. No model-backed reader has been
+integrated or tested yet.
 
 ## What the gateway enforces
 
-Cleanroom tracks two labels per session. A session is contaminated once
-untrusted content has reached it, because it may now be following that
-content's instructions. A session is private once the user's data has reached
-it, because it now has something to leak. Labels only grow.
+Cleanroom tracks two labels per session: `contaminated` for exposure to
+untrusted content, and `private` for access to private data. Labels are added
+when a call is allowed, before its result arrives, and persist for the
+session's lifetime. Policy can also make sessions private from the start.
 
-Every tool has a class:
-
-| Class | Meaning | Held for approval when the session is |
+| Tool class | Meaning | Held for approval when the session is |
 | --- | --- | --- |
-| `read` | returns content, changes nothing | never; the session takes on the content's labels |
-| `write` | changes state inside the system | never; the writer's labels are left on what it wrote to |
-| `egress` | can carry data out, but does nothing in your name (fetching a URL) | contaminated and private |
-| `act` | does something in your name (sending mail, creating an event) | contaminated |
+| `read` | Returns content | Never; the session acquires the content's labels |
+| `write` | Changes state inside the system | Never; the upstream acquires the writer's labels |
+| `egress` | Can send data out, such as a URL fetch | Contaminated and private |
+| `act` | Acts on the user's behalf, such as creating an event | Contaminated |
 
-The class comes from the policy file. For a tool the policy does not mention,
-cleanroom takes a first guess from the MCP tool annotations (`readOnlyHint`,
-`destructiveHint`, `openWorldHint`). Annotations come from the upstream
-server, so the policy always wins: in the demo, the calendar server calls
-`create_event` a non-destructive write, and the policy says it acts for the
-user. A source does not get to class its own tools at all: on an upstream that
-has labels, annotations are ignored and every tool needs a policy entry. A
-tool with no class is refused and not offered.
+These are the default hold rules. A tool's `always_hold` policy setting
+requires approval for every call, regardless of class or session labels.
 
-A tool marked `discard_result` in the policy returns nothing to the agent but
-whether it ran. That is for tools called for their effect, such as sending
-mail. Without it, calling any tool of an untrusted source would contaminate
-the caller, and with it nothing about the tool's output has to be taken on
-trust, error messages included.
+The policy assigns tool classes. For upstreams without labels, MCP annotations
+(`readOnlyHint`, `destructiveHint`, `openWorldHint`) supply defaults. For
+upstreams with labels, every tool needs an explicit policy entry. Unclassified
+tools are refused and omitted from the tool list.
 
-The rest of what holds, with the test that checks it:
+`discard_result` suppresses a tool's output, including error text, and returns
+only whether it ran. This lets an agent call a tool for its effect without
+acquiring labels from the response.
 
-- One append-only log, shared by every session and process, is the only
-  state. A session's labels are a fold over it (`internal/core/state.go`).
-- The decision is a pure function of the policy, the log and the call
-  (`core.Decide`). A test fails if that package imports anything that can do
-  I/O or reads the clock. Any decision can be replayed: `cleanroom explain N`.
-- A call is decided and recorded under the log's lock before anything else
-  happens. No upstream is contacted and no name is resolved before the
-  decision. A session takes on a read's labels at that moment, before the
-  content comes back, so a call made in parallel cannot slip past
-  (`TestParallelCallsCannotSlipPast`).
-- A held or refused call never reaches the upstream. The tests count what the
-  fake upstreams saw.
-- Labels follow data. A stored answer keeps the labels of the reader that
-  wrote it and of the session that asked, and a session that reads it takes
-  them on. A session that writes to an upstream leaves its labels there for
-  later readers (`TestLabelsFollowStoredValues`,
+The mail source exposes only `search` and `read`. It has no send tool or SMTP
+code, so approval cannot enable sending mail.
+
+The main invariants are:
+
+- The append-only event log is the source of session state. `core.Decide` is
+  a pure function of the policy, log and call. `cleanroom explain N` replays
+  a decision.
+- Each call is decided and recorded under the log's lock before any
+  argument-dependent I/O. Read labels apply at that point, so concurrent
+  calls see them (`TestParallelCallsCannotSlipPast`).
+- Held and refused calls never reach an upstream. Calls to unoffered tools
+  are also refused and logged (`TestUnofferedToolIsRefusedAndRecorded`).
+  Log summaries omit the attempted tool name; the raw log retains it.
+- Labels follow data. Stored answers carry the source's and asker's labels;
+  writes propagate labels to the upstream (`TestLabelsFollowStoredValues`,
   `TestAnswersCarryTheAskersLabels`).
-- A question is data leaving the session, since the reader passes it on to
-  the source. A session that is contaminated and private may not ask a source
-  whose reader can send data out (`TestAskIsNotAWayOut`).
-- Arguments that repeat a key, or have keys that differ only in case, are
-  refused, so the approval screen and the upstream cannot disagree about
-  what a call says.
-- A session is identified by `--session` or `CLEANROOM_SESSION`, chosen by
-  whatever launches the server. A conversation that is resumed under the same
-  id gets its history back from the log and does not come back clean
-  (`TestResumedSessionIsStillContaminated`, and scene 6).
-- Random histories of asks, reads, writes and approvals across three sessions
-  are checked against a second, deliberately naive model of contamination
-  (`TestHistoryProperties`).
+- A contaminated, private session cannot ask a source whose reader can send
+  data out (`TestAskIsNotAWayOut`). The question itself could contain data.
+- Arguments with duplicate keys or keys that differ only in case are refused
+  to prevent ambiguous interpretation.
+- Reusing a `--session` id restores its history, including contamination
+  (`TestResumedSessionIsStillContaminated`).
 
-One case shows the limit of the design clearly. An event built from typed
-values is safe to create without approval: the date comes from `ask`, and the
-title is the agent's own words ("Family reunion"). The location in the
-invitation is free text. To put it on the event, the agent has to read it,
-which means opting in, and from then on creating the event is held for your
-approval. The uncontaminated path gives you a correct event with no address
-on it. Whether the address is worth an approval is your call, and cleanroom
-makes it a visible one.
+`TestHistoryProperties` checks random histories across three sessions against
+an independent model. Purity tests reject I/O and clock access in the decision
+and type-checking packages.
 
 ## How approval works
 
-When a call is held, the agent is told so and given a proposal number. You
-decide, outside the conversation:
+A held call returns a proposal number. Review it outside the agent's
+conversation:
 
 ```sh
-cleanroom proposals     # what is waiting
-cleanroom show 51       # the full call and why it was held
-cleanroom approve 51    # run it, once
-cleanroom deny 51       # never run it
-cleanroom answers       # free-text answers delivered to you
+cleanroom proposals     # list held calls
+cleanroom show 51       # show the call and why it was held
+cleanroom approve 51    # execute the stored call once
+cleanroom deny 51       # reject the call
+cleanroom answers      # list answers delivered to the user
+cleanroom repair       # set aside an incomplete final log line after a crash
 ```
 
-The screen `show` prints is rendered from the log: the tool, the arguments in
-full, why the call was held with the events that reason cites, and what the
-session has been exposed to. Nothing on it comes from what the model said
-about its own call. Control characters, terminal escapes and direction
-overrides in the arguments are written out as visible escapes, so a call
-cannot repaint your screen or hide its recipient.
+The approval screen shows the tool, full arguments, session labels and the
+events behind the decision. It uses the event log, with control characters,
+terminal escapes and direction overrides displayed as visible escapes.
 
-An approval names the hash of the exact tool and arguments. It is appended to
-the log before the stored call runs, so a second approval finds the first and
-fails. The effect happens at most once, and it runs the arguments cleanroom
-stored, as the session that asked.
+Approval is bound to a hash of the tool and arguments and recorded before
+execution. Cleanroom runs the stored call as the requesting session, at most
+once. A second approval is refused.
 
-`show` and `approve` only work at a terminal. See "Limits" for what that does
-and does not buy.
+`show` and `approve` require a terminal. This prevents accidental use by an
+agent but does not isolate approval from an agent with shell access.
 
 ## How to add a source
 
-A source is an MCP server plus a few lines of policy. Cleanroom knows nothing
-about mail: the mail server is its own Go module in `sources/mail` with no
-imports from the gateway.
+A source is a stdio MCP server with a policy entry. The mail and calendar
+servers are separate Go modules with no imports from the gateway.
 
-1. Write or install an MCP server that speaks stdio.
-2. Add it to the policy with the labels its content carries and the class of
-   each tool:
+1. Write or install a stdio MCP server.
+2. Add its command, content labels, reader and tool classes to the policy:
 
    ```jsonc
    "tickets": {
      "command": ["ticket-mcp-server"],
      "labels": ["contaminated"],          // anyone can file a ticket
-     "ask_only": true,                    // agents ask; a reader reads
-     "reader": ["my-reader", "{mcp_config}", "{question}", "{returns}"],
+     "ask_only": true,
+     "reader": ["my-reader", "--mcp-config", "{mcp_config}",
+                "--question", "{question}", "--returns", "{returns}"],
      "tools": {
        "search": {"class": "read"},
        "comment": {"class": "act", "discard_result": true},
@@ -283,18 +269,16 @@ imports from the gateway.
    },
    ```
 
-   Every tool of a source needs an entry. Tools without one are not offered.
-
+   Give every tool an entry. Pass `{question}` as a flag's value, as shown,
+   so a question starting with `-` is not interpreted as a reader option.
 3. Restart the server. `ask` now accepts `"source": "tickets"`.
 
-Leave out `ask_only` to also let agents call the read tools directly. That is
-the other path: a session that reads a source directly takes on its labels,
-and its later calls are held according to the table above.
+Omit `ask_only` to expose read tools directly to agents. Direct reads add the
+source's labels to the calling session.
 
 ## Using it from a client
 
-Cleanroom is a stdio MCP server and assumes nothing about the client. The
-generic configuration, as in `examples/mcp.json`:
+Register cleanroom as a stdio MCP server:
 
 ```json
 {
@@ -307,136 +291,110 @@ generic configuration, as in `examples/mcp.json`:
 }
 ```
 
-Everything essential works with plain tool calls: `ask`, `read_answer`,
-`status`, and the proxied tools, named `<upstream>_<tool>`.
+Configuration comes from flags and the policy file. The default policy path is
+`~/.config/cleanroom/policy.jsonc`. State is stored in `.cleanroom` beside the
+policy unless `--state` overrides it. The tools are `ask`, `read_answer`,
+`status`, and proxied tools named `<upstream>_<tool>`.
 
-Two things matter in any client.
+Cleanroom must be the session's only source of tools. Disable the client's
+built-in tools and other MCP servers. For
+[Claude Code](https://code.claude.com/docs/en/cli-reference), use
+`--tools "" --strict-mcp-config --mcp-config examples/mcp.json`. The repository
+omits a root `.mcp.json` to avoid automatic loading alongside unrestricted
+tools.
 
-Cleanroom must be the session's only source of tools. It governs the calls
-that pass through it. If the client also gives the model a shell or a web
-fetch tool, the model can go around the gateway, and a session that cleanroom
-has marked contaminated is exactly the one that might. In Claude Code that
-means starting it with `--tools "" --strict-mcp-config --mcp-config
-examples/mcp.json`. In other clients, disable the built-in tools the same way
-the client documents.
-
-Give each conversation its own `--session` id and reuse it when the
-conversation is resumed. The protocol gives a stdio server no way to learn
-which conversation it is serving, so the launcher has to say. Without an id
-the server makes one up and warns on stderr that a resumed conversation would
-start clean.
-
-The repository has no `.mcp.json` at its root on purpose. A client that loaded
-it automatically would add cleanroom next to its own tools, which is the
-arrangement the paragraph above warns against.
+Give each conversation a unique `--session` id and reuse it on resume. Without
+an id, the server generates one and warns that a resumed conversation would
+start without its history.
 
 ## Limits
 
-- Cleanroom only governs calls that pass through it. The "only source of
-  tools" requirement above is the largest limit of the whole design.
-- The guarantee that survives a capable agent with a shell is the first one:
-  nothing a reader read reaches the agent through `ask`, so the agent stays
-  uncontaminated and has no reason to misbehave. Holding and approval bind
-  only an agent whose tools all come from cleanroom.
-- On one machine, every process runs as you. An agent with a shell can read
-  the event log, which holds the text of answers, or run `cleanroom approve`
-  itself. The terminal check on `show` and `approve` stops accidents and the
-  casual case. It is not a boundary. A real one needs the agent in a sandbox
-  or under another user, or the approval moved to another device.
-- A typed value can be wrong. It can also carry bits: a compromised reader
-  chooses which valid value to return. A date holds about 17 bits, a number
-  about 71, and a record of sixteen numbers about 140 bytes
-  (`TestCapacity` counts them). The id of an ask also reveals how many calls
-  earlier readers made, up to their budget of 40. That is a covert channel to
-  an agent that is not listening for one, not an injection.
-- An upstream's tool names, descriptions and schemas are passed to the agent
-  as they are. They come from the server's code, which the policy trusts, not
-  from its content. A remote server that could change them would need more
-  than this.
-- A reader is only as confined as its command. Cleanroom gives it the tools
-  of one source, but the program runs as you, with your environment. A model
-  behind a reader must be started with no tools of its own.
-- A session id is whatever the launcher passes. An agent with a shell could
-  start a second server under a new id and be clean there.
-- A contaminated and private session that asks a source whose reader can
-  send data out is refused, not held. Holding an ask for approval is not
-  built.
-- `explain` replays a decision under the current policy. If the policy has
-  changed since, it says so instead of matching.
-- The policy file is trusted. A tool classed `read` that in fact sends mail,
-  or a source whose labels leave out `contaminated`, defeats the tracking.
-- Labels on an upstream are tracked per upstream, not per item, because
-  cleanroom cannot see inside a server. One contaminated write marks the
-  whole store. That never under-reports, but it is coarse.
-- A reader's model provider sees what the reader reads. With a hosted model,
-  your mail goes to that provider.
-- Approval fatigue is the failure mode of the opt-in path. Every held call
-  puts text shaped by untrusted content in front of you and asks for a
-  decision. The design's answer is to make the typed path good enough that
-  the opt-in is rare.
-- "No answer" and timing are visible to the agent. Two cooperating sessions
-  could pass bits that way. The agent is not told why there was no answer.
-- Reading a message through Mailpit's API marks it as read. The IMAP back end
-  that would avoid this is not built yet.
-- The log is a plain file that is read in full on each decision. That is
-  fine for a person's assistant and would not be for a busy service. Damage
-  inside it is detected and stops everything. It has no checksum, so it is
-  not protected against tampering by a process running as you, and a log cut
-  off cleanly at the end of a line reads as a shorter log.
-- Unix only: the log is locked with `flock`.
+- **Tool access:** cleanroom governs only calls routed through it. A shell or
+  another tool provider can bypass its restrictions. Typed answer validation
+  still applies to `ask`, but it cannot protect other input paths.
+- **Process isolation:** readers run as the current user with the inherited
+  environment. Their MCP access is restricted, but the processes are not
+  sandboxed. A shell-capable agent can read the log, run approval commands,
+  or start a server with a new session id. Strong isolation requires a
+  sandbox, separate OS user, or approval on another device.
+- **Trusted configuration:** the policy and upstream server code are trusted.
+  Incorrect classes or labels defeat tracking. Upstream descriptions and
+  input schemas reach the agent without content filtering. Tool names receive
+  an upstream prefix, and descriptions include the gateway's policy notes.
+- **Answer accuracy and covert channels:** type checks do not establish truth.
+  A reader can encode bits in valid values: about 17 in a date, 71 in a number,
+  or 140 bytes in a record of sixteen numbers (`TestCapacity`). Timing,
+  `no_answer`, and ask ids can also convey information. Ask ids reveal earlier
+  readers' call counts, bounded by 40 calls per reader.
+- **Label granularity:** labels apply to an entire upstream. One contaminated
+  write labels the whole store because the gateway cannot track individual
+  items inside it.
+- **Model privacy:** a hosted reader's model provider sees the source content.
+- **Approval:** contaminated, private sessions cannot ask sources whose readers
+  can send data out; approval for these asks is not implemented. Reviewing
+  many held calls can cause approval fatigue, and their arguments may contain
+  attacker-controlled text.
+- **Replay:** `explain` uses the current policy. It reports a mismatch if that
+  policy produces a different decision from the recorded one.
+- **Mailpit:** reading a message marks it as read. An IMAP back end is planned.
+- **Log storage:** each decision reads the entire log. It has no checksum and
+  cannot detect truncation at a line boundary or tampering by another process
+  running as the same user. An unreadable or malformed log stops decisions.
+  Failed partial appends are rolled back. `cleanroom repair` can preserve an
+  incomplete final line in `events.jsonl.cut-off`; other damage requires
+  manual repair.
+- **Process cleanup:** cleanroom kills the reader's process group after reaping
+  the reader. There is a brief risk of the group id being reused.
+- **Platform:** Unix only; log locking uses `flock`.
 
 ## Not built yet
 
-The plan in `PLAN.md` has fourteen steps. Steps 1 to 8 are here. Not here:
+Remaining work:
 
-- Step 9, a model behind the reader. The command back end exists and is
-  tested with scripted readers. No model-backed reader has been wired or run.
-- Step 10, a web source, and with it demo scene 7 (a fetch whose URL carries
-  private data is held, with no DNS lookup before the decision). The `egress`
-  class and its rule are implemented and tested in the core.
-- Step 11, approval through MCP elicitation. Approval is on the command line
-  only.
-- Step 12, proposals, answers and session state as MCP resources. There is a
-  `status` tool instead.
-- Step 13, the IMAP back end for the mail source. The `Mailbox` interface in
-  `sources/mail` is ready for it.
-- Step 14, the approval web page.
+- A model-backed reader. The command interface is tested with scripted readers.
+- A web source and demo scene 7, which checks that a held fetch makes no DNS
+  request. The core already implements and tests the `egress` rule.
+- Approval through MCP elicitation.
+- MCP resources for proposals, answers and session state. Currently these use
+  CLI commands and the `status` tool.
+- An IMAP mail back end, using the existing `Mailbox` interface.
+- An approval web page.
+
+A shared, long-running server is deferred. Each stdio process currently serves
+one conversation and keeps its own upstream connections. A shared server
+would need another transport and a way for clients to identify their sessions.
 
 ## Layout
 
 ```
-cmd/cleanroom/       the one binary: serve, reader-tools, and the person's commands
-internal/core/       the decision. Pure: labels, policy, events, folds, Decide
-internal/typed/      the type checker for reader answers. Pure
-internal/eventlog/   the log file and its lock
-internal/gateway/    the MCP server: proxying, ask, read_answer, status
-internal/reader/     running a reader as a command
-internal/approval/   the person's screens and the once-only effect
-internal/upstream/   MCP client connections to the servers behind the gateway
-internal/config/     loading the policy file
-sources/mail/        the mail MCP server (its own module)
-sources/calendar/    the calendar and reminders MCP server (its own module)
-demo/                the scripted demo, its policy, inbox, reader and seed command
-DESIGN.md            decisions and the threat model
+cmd/cleanroom/       CLI, stdio server and reader-tools connection
+internal/core/       pure decisions, labels, policy and event state
+internal/typed/      pure answer validation
+internal/eventlog/   log storage and locking
+internal/gateway/    MCP proxy, ask, read_answer and status
+internal/reader/     reader processes and tool access
+internal/approval/   approval screens and execution
+internal/upstream/   upstream MCP connections
+internal/config/     policy loading
+sources/mail/        mail server (separate Go module)
+sources/calendar/    calendar and reminders server (separate Go module)
+demo/               scripted agent, reader, policy, inbox and seed command
 ```
 
-Start reading at `internal/core/doc.go`, then `internal/core/decide.go`.
+Start with `internal/core/doc.go`, then `internal/core/decide.go`.
 
 ## Prior art
 
-- Simon Willison named the [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/)
-  (private data, untrusted content, a way to send data out) and described the
-  [dual LLM pattern](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/),
-  in which a quarantined model reads untrusted content and a privileged one
-  never does. The reader is a quarantined model.
+- Simon Willison's [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/)
+  describes the combination of private data, untrusted content and external
+  communication. His [dual LLM pattern](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
+  separates a quarantined reader from a privileged agent.
 - Meta's [Agents Rule of Two](https://ai.meta.com/blog/practical-ai-agent-security/)
-  says a session should hold at most two of those three properties. The
-  `egress` rule is that rule.
-- Microsoft's [FIDES](https://arxiv.org/abs/2505.23643) tracks confidentiality
-  and integrity labels through an agent's plan and enforces policy
-  deterministically. Cleanroom's labels are a small version of the same idea,
-  applied at the MCP boundary.
-- Google DeepMind's [CaMeL](https://arxiv.org/abs/2503.18813) is the closest
-  relative. Its quarantined model returns values into a restricted
-  interpreter. Cleanroom's reader returns typed values across a protocol
-  boundary, and works with any agent that speaks MCP.
+  recommends supervision when a session combines untrusted input, sensitive
+  access, and state changes or external communication.
+- [FIDES](https://arxiv.org/abs/2505.23643) tracks confidentiality and
+  integrity labels through an agent's plan and enforces policy deterministically.
+  Cleanroom applies similar labels at the MCP boundary.
+- [CaMeL](https://arxiv.org/abs/2503.18813) separates control and data flow and
+  checks capabilities when tools are called. Cleanroom enforces its policy at
+  the MCP boundary.

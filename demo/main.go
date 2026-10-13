@@ -60,7 +60,6 @@ func main() {
 	fmt.Printf("The event log behind every decision: %s\n", filepath.Join(d.state, eventlog.FileName))
 }
 
-// demo holds what the scenes share.
 type demo struct {
 	root   string // repository root, absolute
 	policy string // path of the demo policy
@@ -154,7 +153,6 @@ func mailpitUp() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// sentTo counts the messages in Mailpit addressed to addr.
 func sentTo(addr string) (int, error) {
 	client := http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get("http://" + mailpitHTTP + "/api/v1/search?query=to:" + addr)

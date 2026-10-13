@@ -1,68 +1,66 @@
 # calendar-source
 
-A stdio MCP server that writes calendar events to a local `.ics` file and
-reminders to a local JSON file. It depends only on the Go standard library and
-the official MCP Go SDK, and it imports nothing else from the repository that
-contains it.
+A stdio MCP server that stores calendar events in a local `.ics` file and
+reminders in JSON. This is a separate Go module. Its only direct dependency
+outside the standard library is the official MCP Go SDK.
 
 ## Tools
 
-- `create_event`: adds an all-day event. Arguments: `title`, `date`
-  (`YYYY-MM-DD`), and optionally `end_date` (the inclusive last day),
-  `location`, `description`. Returns `uid` and `file`.
-- `create_reminder`: adds a reminder. Arguments: `title`, `due`
-  (`YYYY-MM-DD`), and optionally `note`. Returns `id` and `file`.
-- `list_events`: returns every event.
-- `list_reminders`: returns every reminder.
+| Tool | Arguments | Result |
+| --- | --- | --- |
+| `create_event` | Required: `title`, `date`. Optional: `end_date` (inclusive), `location`, `description`. | `uid`, `file` |
+| `create_reminder` | Required: `title`, `due`. Optional: `note`. | `id`, `file` |
+| `list_events` | None | All events in creation order |
+| `list_reminders` | None | All reminders in creation order |
 
-Titles and locations are limited to 200 characters, and descriptions and notes
-to 2000. Dates must be real calendar dates, and `end_date` cannot be before
-`date`. Invalid input comes back as a tool error.
+Events are all-day events. Dates use `YYYY-MM-DD`, with years from 1900 to
+9000. `end_date` defaults to `date` and cannot precede it. Titles are required.
+Titles and locations allow up to 200 characters; descriptions and notes allow
+up to 2000. Invalid input returns a tool error.
 
-The create tools are marked as non-read-only, non-destructive, and
-non-idempotent. The list tools are marked read-only. All four are marked closed
-world.
+Create tools advertise non-destructive writes; list tools advertise reads.
+All four tools advertise closed-world MCP annotations.
 
 ## Configuration
 
-Files are kept in one directory, set with `--dir` or the `CALENDAR_DIR`
-environment variable. The default is `./calendar-data`. The server creates it
-if it is missing.
+`--dir` sets the storage directory, defaulting to `./calendar-data`. The server
+creates the directory if needed.
 
 | File | Contents |
 | --- | --- |
-| `events.json` | Source of truth for events |
-| `calendar.ics` | iCalendar file, regenerated from `events.json` on every change |
-| `reminders.json` | Reminders |
+| `events.json` | Stored events |
+| `calendar.ics` | iCalendar export, regenerated when an event is added |
+| `reminders.json` | Stored reminders |
 
-Writes go to a temporary file that is renamed into place. Each operation
-holds a lock on a `.lock` file in the directory, so several servers can share
-one directory without losing entries. The directory and its files are readable
-only by the user. The server logs to stderr only.
+Each operation holds a `.lock` file lock so multiple server processes can
+share the directory. Files are written to temporary files and renamed into
+place. New directories use mode `0700`; data files use `0600`. Existing
+directory permissions are unchanged. Logs go to stderr.
 
 ## Run
 
-```
+From this module's directory:
+
+```sh
 go build -o calendar-source .
 ./calendar-source --dir ./calendar-data
 ```
 
-Register the binary as a stdio server in your MCP client, for example with the
-command `/path/to/calendar-source` and the argument `--dir /path/to/data`.
+Register the binary as a stdio server in your MCP client, with `--dir` and the
+storage path as separate arguments.
 
 ## Test
 
-```
+```sh
 go test -race ./...
 go test -run '^$' -fuzz FuzzRenderICS -fuzztime=10s
 ```
 
-The fuzz test generates events from arbitrary text and checks that each result
-parses back as one event with the original title, that lines are at most 75
-octets, and that every line ends in CRLF.
+The fuzz test checks event boundaries, text escaping, line lengths and CRLF
+line endings.
 
 ## Open the calendar
 
-Double-click `calendar.ics` to import it into Apple Calendar, or use
-Import in Google Calendar settings. Re-importing the file after adding events
-does not duplicate older ones, because each event has a stable `UID`.
+Import `calendar.ics` into a calendar application. Stored events retain their
+UIDs when the file is regenerated; the importing application determines how
+repeated imports are handled.

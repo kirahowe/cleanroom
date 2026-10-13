@@ -6,10 +6,10 @@ package core
 // effect is a call that took effect: either it was allowed to run when it
 // was decided, or it was held and the person later approved it.
 type effect struct {
-	at    int      // Seq of the event at which it took effect
-	call  *Decided // the call
-	held  Labels   // what its session carried at that moment
-	gains Labels   // what its session took on at that moment
+	at    int // Seq of the event at which it took effect
+	call  *Decided
+	held  Labels // what its session carried at that moment
+	gains Labels // what its session took on at that moment
 }
 
 // effects lists the calls in a log that took effect, in order. Refused
