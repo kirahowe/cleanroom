@@ -142,6 +142,21 @@ func TestInitRefusals(t *testing.T) {
 	}
 }
 
+func TestInitCancelledPrompts(t *testing.T) {
+	for name, input := range map[string]string{"consent": "", "user name": "yes\n"} {
+		t.Run(name, func(t *testing.T) {
+			bin := fakeBinDir(t, true)
+			dir := filepath.Join(t.TempDir(), "cleanroom")
+			runCancelledPrompt(t, input, "init", "--policy", filepath.Join(dir, "policy.jsonc"), "--bin-dir", bin)
+			for _, path := range []string{dir, filepath.Join(bin, "args")} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Errorf("cancelled setup created %s or contacted mail-source: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInitRequiresConsentBeforeCredentialsOrMailAccess(t *testing.T) {
 	for name, input := range map[string]string{
 		"decline": "no\n", "default": "\n", "EOF": "", "incomplete": "yes",

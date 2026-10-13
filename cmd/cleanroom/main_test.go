@@ -29,6 +29,11 @@ func TestMain(m *testing.M) {
 		fakeUpstream()
 	case "reader":
 		fakeReader()
+	case "blocked-command":
+		os.Exit(withSignals(func(context.Context) int {
+			fmt.Println("waiting")
+			select {} // stand in for a dependency that ignores cancellation
+		}))
 	default:
 		os.Exit(m.Run())
 	}
@@ -296,6 +301,21 @@ func TestPersonCommands(t *testing.T) {
 	}
 
 	// At a terminal, anything but the proposal number cancels.
+	// Ctrl+C also cancels, even after a partial confirmation, and leaves
+	// the proposal pending without executing or denying it.
+	for _, input := range []string{"", "1"} {
+		out = runCancelledPrompt(t, input, "approve", "--policy", policy, "1")
+		if !strings.Contains(out, "The call is still held") {
+			t.Errorf("interrupted approve:\n%s", out)
+		}
+		out, _ = runCLI(t, false, "", "proposals", "--policy", policy)
+		if strings.Count(out, "pending") != 2 {
+			t.Errorf("interrupted approve changed a proposal:\n%s", out)
+		}
+		if _, err := os.Stat(trace); !os.IsNotExist(err) {
+			t.Fatalf("interrupted approve ran the call: %v", err)
+		}
+	}
 	out, _ = runCLI(t, true, "yes\n", "approve", "--policy", policy, "1")
 	if !strings.Contains(out, "Cancelled") {
 		t.Errorf("approve with the wrong confirmation:\n%s", out)

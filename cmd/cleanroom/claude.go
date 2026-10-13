@@ -59,10 +59,8 @@ func claudeCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			id = newUUID()
 		}
 
-		cmd := exec.Command(*claude, claudeSessionArgs(serveArgv(self, policyFlag, stateDir), id, *resume != "")...)
+		cmd := exec.CommandContext(ctx, *claude, claudeSessionArgs(serveArgv(self, policyFlag, stateDir), id, *resume != "")...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = c.stdin, c.stdout, c.stderr
-		// Not tied to ctx: Ctrl-C belongs to the conversation, which
-		// uses it to interrupt a reply.
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("could not start Claude Code: %w", err)
 		}

@@ -28,6 +28,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -35,11 +36,9 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	"golang.org/x/term"
 
@@ -48,19 +47,23 @@ import (
 )
 
 func main() {
+	os.Exit(mainCode())
+}
+
+func mainCode() int {
 	log.SetFlags(0)
 	log.SetPrefix("cleanroom: ")
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	terminal := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 	readPassword := func() (string, error) {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		return string(b), err
 	}
-	os.Exit(run(ctx, os.Args[1:], stdio{
-		stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
-		terminal: terminal, readPassword: readPassword,
-	}))
+	return withSignals(func(ctx context.Context) int {
+		return run(ctx, os.Args[1:], stdio{
+			stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
+			terminal: terminal, readPassword: readPassword,
+		})
+	})
 }
 
 type command struct {
@@ -100,6 +103,7 @@ type stdio struct {
 
 type common struct {
 	stdio
+	input      commandInput
 	policyPath string
 	stateDir   string
 }
@@ -205,7 +209,7 @@ func run(ctx context.Context, args []string, sio stdio) int {
 		return 2
 	}
 
-	c := &common{stdio: sio}
+	c := &common{stdio: sio, input: commandInput{ctx, bufio.NewReader(sio.stdin)}}
 	fs := flag.NewFlagSet("cleanroom "+cmd.name, flag.ContinueOnError)
 	fs.SetOutput(sio.stderr)
 	fs.StringVar(&c.policyPath, "policy", "", "path to the policy file (default: ~/.config/cleanroom/policy.jsonc)")
@@ -217,7 +221,11 @@ func run(ctx context.Context, args []string, sio stdio) int {
 		}
 		return 2
 	}
-	if err := runCmd(ctx); err != nil {
+	err := runCmd(ctx)
+	if ctx.Err() != nil {
+		return 130
+	}
+	if err != nil {
 		fmt.Fprintf(sio.stderr, "cleanroom %s: %v\n", cmd.name, err)
 		return 1
 	}

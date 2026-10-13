@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -148,8 +147,8 @@ func approveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		pr, _ := core.ProposalAt(events, seq)
 		fmt.Fprint(c.stdout, screen)
 		fmt.Fprintf(c.stdout, "\nType %d and press Enter to approve. Anything else cancels: ", seq)
-		line, _ := bufio.NewReader(c.stdin).ReadString('\n')
-		if strings.TrimSpace(line) != strconv.Itoa(seq) {
+		line, err := c.input.ReadLine()
+		if err != nil || strings.TrimSpace(line) != strconv.Itoa(seq) {
 			fmt.Fprintln(c.stdout, "Cancelled. The call is still held.")
 			return nil
 		}
