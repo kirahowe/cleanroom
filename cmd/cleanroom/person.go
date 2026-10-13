@@ -146,10 +146,10 @@ func approveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		}
 		pr, _ := core.ProposalAt(events, seq)
 		fmt.Fprint(c.stdout, screen)
-		fmt.Fprintf(c.stdout, "\nType %d and press Enter to approve. Anything else cancels: ", seq)
+		fmt.Fprint(c.stdout, approvePrompt(seq))
 		line, err := c.input.ReadLine()
 		if err != nil || strings.TrimSpace(line) != strconv.Itoa(seq) {
-			fmt.Fprintln(c.stdout, "Cancelled. The call is still held.")
+			fmt.Fprint(c.stdout, notApproved(seq, err == nil))
 			return err
 		}
 
@@ -170,6 +170,21 @@ func approveCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		fmt.Fprintf(c.stdout, "Approved. The call ran once: %s.\n", status)
 		return nil
 	}
+}
+
+// approvePrompt asks for the proposal's number and not a bare Enter, so
+// that approving takes a deliberate act.
+func approvePrompt(seq int) string {
+	return fmt.Sprintf("\nTo approve, type the proposal number, %d, and then press Enter.\nEnter alone, or anything else, cancels: ", seq)
+}
+
+// notApproved says that the call stays held, and why when the person
+// answered the prompt with something other than the number.
+func notApproved(seq int, answered bool) string {
+	if !answered {
+		return "Cancelled. The call is still held.\n"
+	}
+	return fmt.Sprintf("Cancelled, because what you entered was not %d. The call is still held.\n", seq)
 }
 
 func denyCommand(fs *flag.FlagSet, c *common) func(context.Context) error {

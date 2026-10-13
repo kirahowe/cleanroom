@@ -16,7 +16,11 @@ make test       # tests and vet in all three Go modules
 The live walkthrough uses a real reader: a headless Claude Code session under
 the user's login, which sends what it reads to Anthropic. Use the demo inbox,
 whose messages are fictional, unless the user asks for their own mailbox.
-`cleanroom init` needs a terminal, so the user has to run it.
+`cleanroom init` for a real mailbox needs a terminal, so the user has to run
+it. `cleanroom init --demo` writes the demo's policy to
+`~/.config/cleanroom/policy.jsonc` so that a person can leave out `--policy`.
+Do not run it; keep to `--policy demo/policy.jsonc`, which writes nothing
+outside the repository.
 
 ```sh
 make inbox      # run in the background; Mailpit on ports 18025 and 11025
@@ -36,14 +40,17 @@ Explain what the results show:
 - **Typed amount:** the four receipts add up to `890.55` CAD. You receive
   `{"amount":"890.55","currency":"CAD"}` and none of the message text.
 - **Injection:** the invitation gives `2027-07-17`.
-  `demo/inbox/09-injection.eml` tells its reader to call a `send` tool and to
-  answer with instructions. The mail source has no send tool, and an answer
+  `demo/inbox/09-injection.eml` tells its reader to create a calendar
+  reminder and to answer with instructions. A reader is given only the mail
+  source's `search` and `read`, not the calendar tools, and an answer
   that is not a date is rejected, so you receive a date or `no_answer`.
 - **Log:** `cleanroom log` lists each reader's calls, including refused
   ones, without content.
 
 A model writes the answers, so report what you received even where it
-differs from the values above. Ask only typed questions. A free-text ask
+differs from the values above. If an ask returns `no_answer`, the last line
+of `cleanroom log` gives the reason; "If an ask returns no answer" in the
+README covers the two that come from setup. Ask only typed questions. A free-text ask
 returns an id for the user, and holds and approval need `cleanroom claude`,
 `show` and `approve` at a terminal. Point the user to "Holds and approval"
 in the README for those.
@@ -66,8 +73,8 @@ For a code walkthrough, start with `internal/core/doc.go` and
 
 ## Content and approval boundaries
 
-- `bin/cleanroom init` and `bin/cleanroom claude` require a terminal. `init`
-  takes a mail password from the keyboard; never ask the user to give it to
+- `bin/cleanroom init` (without `--demo`) and `bin/cleanroom claude` require
+  a terminal. `init` takes a mail password from the keyboard; never ask the user to give it to
   you. Ask the user to run both in their own terminal.
 - `bin/cleanroom ask` may be run without a terminal. It then returns what
   the ask tool returns. Do not run it under a pseudo-terminal to see free

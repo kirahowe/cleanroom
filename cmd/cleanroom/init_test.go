@@ -19,7 +19,7 @@ func fakeBinDir(t *testing.T, checkSucceeds bool) string {
 	t.Helper()
 	dir := t.TempDir()
 	linkFake(t, "mail-source", filepath.Join(dir, "mail-source"))
-	files := map[string]string{"claude-reader": "#!/bin/sh\n"}
+	files := map[string]string{"claude-reader": "#!/bin/sh\n", "calendar-source": "#!/bin/sh\n"}
 	if !checkSucceeds {
 		files["login-fails"] = ""
 	}
@@ -109,6 +109,52 @@ func TestInit(t *testing.T) {
 	// A second run leaves the policy alone.
 	if out, ok := runCLI(t, true, "someone@example.com\n", "init", "--policy", policy, "--bin-dir", bin); ok || !strings.Contains(out, "already exists") {
 		t.Errorf("init over an existing policy: %v\n%s", ok, out)
+	}
+}
+
+// The demo's policy asks nothing, so it can be written without a terminal.
+// A file init --demo wrote may be replaced; one for a real mailbox may not.
+func TestInitDemo(t *testing.T) {
+	bin := fakeBinDir(t, true)
+	policy := filepath.Join(t.TempDir(), "cleanroom", "policy.jsonc")
+
+	out, ok := runCLI(t, false, "", "init", "--demo", "--policy", policy, "--bin-dir", bin)
+	if !ok {
+		t.Fatal(out)
+	}
+	for _, want := range []string{policy, "make inbox", "Anthropic", "cleanroom ask --policy " + policy + " \"How much"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(bin, "args")); !os.IsNotExist(err) {
+		t.Errorf("the demo setup ran mail-source: %v", err)
+	}
+
+	cfg, err := config.Load(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mail := cfg.Policy.Upstreams["mail"]
+	if want := []string{filepath.Join(bin, "mail-source"), "--mailpit-url", demoMailpit}; !slices.Equal(mail.Command, want) {
+		t.Errorf("command = %q, want %q", mail.Command, want)
+	}
+	if !mail.AskOnly || !mail.Labels.Contaminated || !mail.Labels.Private || mail.Reader[0] != filepath.Join(bin, "claude-reader") {
+		t.Errorf("the mail upstream is not ask-only, contaminated and private with a reader: %+v", mail)
+	}
+	calendar := cfg.Policy.Upstreams["calendar"]
+	if calendar.Command[0] != filepath.Join(bin, "calendar-source") || len(calendar.Tools) != 2 {
+		t.Errorf("calendar = %+v", calendar)
+	}
+
+	if out, ok := runCLI(t, false, "", "init", "--demo", "--policy", policy, "--bin-dir", bin); !ok {
+		t.Errorf("a second init --demo: %s", out)
+	}
+	if out, ok := runCLI(t, true, "yes\nkira@example.com\n", "init", "--policy", policy, "--bin-dir", bin); !ok {
+		t.Fatalf("init over a demo policy: %s", out)
+	}
+	if out, ok := runCLI(t, false, "", "init", "--demo", "--policy", policy, "--bin-dir", bin); ok || !strings.Contains(out, "already exists") {
+		t.Errorf("init --demo over a mailbox's policy: %v\n%s", ok, out)
 	}
 }
 

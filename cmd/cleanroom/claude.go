@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
+	"strings"
 	"syscall"
 
 	"cleanroom/internal/config"
@@ -117,9 +119,9 @@ func (c *common) absoluteFlags() (policyFlag, stateDir string, err error) {
 	return policyFlag, stateDir, nil
 }
 
-// claudeSettingsCommand prints what to add to Claude Code's settings so
-// that it may start cleanroom, for a user whose settings list the MCP
-// servers that are allowed.
+// claudeSettingsCommand prints the entries Claude Code's settings need so
+// that it may start cleanroom, and says which of them are already there,
+// for a user whose settings list the MCP servers that are allowed.
 func claudeSettingsCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	return func(ctx context.Context) error {
 		policyFlag, stateDir, err := c.absoluteFlags()
@@ -130,7 +132,8 @@ func claudeSettingsCommand(fs *flag.FlagSet, c *common) func(context.Context) er
 		if err != nil {
 			return err
 		}
-		fmt.Fprint(c.stdout, claudeSettingsText([]string{self, "reader-tools"}, serveArgv(self, policyFlag, stateDir)))
+		file := allowlistFile(claudeSettingsFiles())
+		fmt.Fprint(c.stdout, claudeSettingsText([]string{self, "reader-tools"}, serveArgv(self, policyFlag, stateDir), file, allowedCommands(file)))
 		return nil
 	}
 }
@@ -143,14 +146,38 @@ func allowEntry(argv []string) string {
 	return `    { "serverCommand": ` + string(b) + ` }`
 }
 
-func claudeSettingsText(readerTools, serve []string) string {
-	entry := allowEntry
-	return "Claude Code starts cleanroom as an MCP server in two places. If your Claude Code\n" +
-		"settings have an \"allowedMcpServers\" list, add these entries to it:\n\n" +
-		entry(readerTools) + ",\n" + entry(serve) + "\n\n" +
-		"The first is the reader behind \"cleanroom ask\". The second is \"cleanroom claude\",\n" +
+// claudeSettingsText says what the "allowedMcpServers" list in file needs
+// and which of it is in allowed, the commands that list has now. An empty
+// file means no settings file has the list.
+func claudeSettingsText(readerTools, serve []string, file string, allowed [][]string) string {
+	const about = "The first is the reader behind \"cleanroom ask\". The second is \"cleanroom claude\",\n" +
 		"and depends on the --policy and --state you run it with. Each entry allows that\n" +
-		"exact command and no other. Settings without the list need no change.\n"
+		"exact command and no other.\n"
+	if file == "" {
+		return "Claude Code starts cleanroom as an MCP server in two places. Your Claude Code\n" +
+			"settings have no \"allowedMcpServers\" list, so nothing needs adding.\n\n" +
+			"If you add that list later, it will need these entries:\n\n" +
+			allowEntry(readerTools) + ",\n" + allowEntry(serve) + "\n\n" + about
+	}
+	var present, missing []string
+	for _, argv := range [][]string{readerTools, serve} {
+		if slices.ContainsFunc(allowed, func(have []string) bool { return slices.Equal(have, argv) }) {
+			present = append(present, allowEntry(argv))
+		} else {
+			missing = append(missing, allowEntry(argv))
+		}
+	}
+	text := "Claude Code starts cleanroom as an MCP server in two places. The\n" +
+		"\"allowedMcpServers\" list in " + file + "\nneeds an entry for each.\n\n"
+	if len(present) > 0 {
+		text += "Already there:\n\n" + strings.Join(present, ",\n") + "\n\n"
+	}
+	if len(missing) > 0 {
+		text += "Missing, to be added:\n\n" + strings.Join(missing, ",\n") + "\n\n"
+	} else {
+		text += "Nothing needs adding.\n\n"
+	}
+	return text + about
 }
 
 func resumeHint(id, policyFlag, stateFlag string) string {
@@ -231,6 +258,30 @@ func allowlistFile(files []string) string {
 		}
 	}
 	return ""
+}
+
+// allowedCommands lists the commands that the "allowedMcpServers" list in
+// file allows by "serverCommand". It is empty when the file cannot be read.
+func allowedCommands(file string) [][]string {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return nil
+	}
+	var settings struct {
+		Allowed []struct {
+			ServerCommand []string `json:"serverCommand"`
+		} `json:"allowedMcpServers"`
+	}
+	if json.Unmarshal(raw, &settings) != nil {
+		return nil
+	}
+	var commands [][]string
+	for _, entry := range settings.Allowed {
+		if len(entry.ServerCommand) > 0 {
+			commands = append(commands, entry.ServerCommand)
+		}
+	}
+	return commands
 }
 
 // toolsBlockedHelp tells a person whose Claude Code settings kept the

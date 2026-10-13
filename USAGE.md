@@ -28,6 +28,11 @@ mailbox it opened. On success it writes `~/.config/cleanroom/policy.jsonc`
 and, beside it, the password in a file only you can read. `init` needs a
 terminal and takes the password only from the keyboard.
 
+`init --demo` writes a policy for the demo inbox in the same place. It reads
+the Mailpit that `make inbox` starts and adds the demo's calendar source. It
+asks nothing, stores no password and runs without a terminal. `init` replaces
+a policy that `init --demo` wrote. Any other existing policy stops both.
+
 `ask` puts the question through the gateway as an agent's ask would go: the
 ask is decided and recorded, a reader searches and reads, and the answer is
 checked. The policy `init` writes uses `claude-reader`, so the mail a
@@ -44,8 +49,9 @@ agent that runs it gets a checked value, and for free text only an id.
 
 Claude Code starts cleanroom as an MCP server in two places: the reader's
 session, and the conversation `cleanroom claude` opens. Nothing needs changing
-unless your Claude Code settings have an `allowedMcpServers` list. If they do,
-print the entries to add to it:
+unless your Claude Code settings have an `allowedMcpServers` list. This
+command looks for the list in your user settings and the managed settings,
+and says which of cleanroom's entries are on it and which are missing:
 
 ```sh
 bin/cleanroom claude-settings
@@ -208,3 +214,35 @@ npx @modelcontextprotocol/inspector --cli --config examples/mcp.json --server cl
 ```
 
 Omit `--cli` to use the Inspector's web interface.
+
+The Inspector starts the server with a reduced environment. If your Claude
+Code login depends on a variable such as `CLAUDE_CONFIG_DIR`, add it under
+`env` in the server's entry in the config. Without it `ask` returns
+`no_answer`, and the log says the reader is not logged in.
+
+### Hold a call from the command line
+
+`examples/mcp.json` gives every call the session id `try-it`, so the
+session's labels carry over from one command to the next:
+
+```sh
+call() {
+  npx @modelcontextprotocol/inspector --cli --config examples/mcp.json --server cleanroom \
+    --method tools/call "$@"
+}
+
+call --tool-name calendar_create_event --tool-arg 'title=Family reunion' --tool-arg date=2027-07-17
+call --tool-name ask --tool-arg source=mail --tool-arg 'question=What does the reunion invitation say?' \
+  --tool-arg returns=text --tool-arg accept_contamination=true
+call --tool-name calendar_create_reminder --tool-arg 'title=Book flights' --tool-arg due=2027-05-01
+```
+
+The event is created without approval. The second call returns mail text
+and contaminates the session. The reminder then comes back with
+`"status": "held"` and a proposal number to pass to `cleanroom show` and
+`cleanroom approve`, as in [How approval works](#how-approval-works). These
+calls use `demo/policy.jsonc`, so give those commands
+`--policy demo/policy.jsonc`.
+
+The session stays contaminated. `rm -rf demo/.cleanroom` clears the demo's
+state.

@@ -118,6 +118,49 @@ func TestNewUUID(t *testing.T) {
 	}
 }
 
+// The text says which entries the list already has, so that a person who
+// added them is not told to add them again.
+func TestClaudeSettingsTextReportsWhatIsThere(t *testing.T) {
+	reader, serve := []string{"/bin/cleanroom", "reader-tools"}, []string{"/bin/cleanroom", "serve"}
+	for name, tc := range map[string]struct {
+		file    string
+		allowed [][]string
+		want    []string
+		absent  []string
+	}{
+		"no list": {"", nil, []string{"no \"allowedMcpServers\" list, so nothing needs adding", `"reader-tools"`, `"serve"`}, []string{"Missing"}},
+		"both":    {"/s.json", [][]string{serve, reader}, []string{"Already there", "Nothing needs adding", "/s.json"}, []string{"Missing"}},
+		"one":     {"/s.json", [][]string{reader}, []string{"Already there:\n\n" + allowEntry(reader), "Missing, to be added:\n\n" + allowEntry(serve)}, []string{"Nothing needs adding"}},
+		"neither": {"/s.json", [][]string{{"/bin/cleanroom", "serve", "--policy", "/p"}}, []string{"Missing, to be added:\n\n" + allowEntry(reader) + ",\n" + allowEntry(serve)}, []string{"Already there", "Nothing needs adding"}},
+	} {
+		text := claudeSettingsText(reader, serve, tc.file, tc.allowed)
+		for _, want := range tc.want {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s: lacks %q:\n%s", name, want, text)
+			}
+		}
+		for _, absent := range tc.absent {
+			if strings.Contains(text, absent) {
+				t.Errorf("%s: has %q:\n%s", name, absent, text)
+			}
+		}
+	}
+}
+
+func TestAllowedCommands(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "settings.json")
+	content := `{"allowedMcpServers": [{"serverCommand": ["/a", "serve"]}, {"serverName": "x"}]}`
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedCommands(file); len(got) != 1 || !slices.Equal(got[0], []string{"/a", "serve"}) {
+		t.Errorf("got %q", got)
+	}
+	if got := allowedCommands(filepath.Join(t.TempDir(), "none.json")); got != nil {
+		t.Errorf("a missing file gave %q", got)
+	}
+}
+
 func TestClaudeSettings(t *testing.T) {
 	out, ok := runCLI(t, false, "", "claude-settings")
 	if !ok {

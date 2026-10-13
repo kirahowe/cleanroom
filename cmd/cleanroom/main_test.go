@@ -429,3 +429,16 @@ func TestParseAnywhere(t *testing.T) {
 		t.Errorf("an unknown flag after an argument was accepted, leaving %q", fs.Args())
 	}
 }
+
+// Enter alone does not approve, and the cancellation says what was expected.
+func TestApprovePromptNamesTheNumberToType(t *testing.T) {
+	if prompt := approvePrompt(318); !strings.Contains(prompt, "type the proposal number, 318,") || !strings.Contains(prompt, "Enter alone") {
+		t.Errorf("prompt: %q", prompt)
+	}
+	if got := notApproved(318, true); !strings.Contains(got, "was not 318") || !strings.Contains(got, "still held") {
+		t.Errorf("after a wrong entry: %q", got)
+	}
+	if got := notApproved(318, false); strings.Contains(got, "318") || !strings.Contains(got, "still held") {
+		t.Errorf("after an interrupt: %q", got)
+	}
+}

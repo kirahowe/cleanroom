@@ -3,7 +3,7 @@
 //
 // Usage:
 //
-//	cleanroom init                   set up a policy for one IMAP mailbox (terminal only)
+//	cleanroom init                   set up a policy for one IMAP mailbox (terminal only), or with --demo the demo inbox
 //	cleanroom ask QUESTION           ask a source a question and print the answer
 //	cleanroom claude                 start a Claude Code conversation with only cleanroom's tools
 //	cleanroom serve [flags]          run the MCP server on stdin and stdout
@@ -76,7 +76,7 @@ type command struct {
 }
 
 var commands = []command{
-	{"init", "set up a policy for one IMAP mailbox (terminal only)", initCommand},
+	{"init", "set up a policy for one IMAP mailbox (terminal only), or with --demo the demo inbox", initCommand},
 	{"ask", "ask a source a question: ask [--returns TYPE] QUESTION", askCommand},
 	{"claude", "start a Claude Code conversation whose only tools are cleanroom's (terminal only)", claudeCommand},
 	{"claude-settings", "print the entries that let Claude Code start cleanroom", claudeSettingsCommand},
