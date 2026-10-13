@@ -12,6 +12,10 @@ type Mailbox interface {
 	Search(ctx context.Context, query string, limit int) ([]Summary, error)
 	// Read returns one message with its plain text body.
 	Read(ctx context.Context, id string) (Message, error)
+	// QuerySyntax tells the caller of the search tool, in a sentence or
+	// two, what a query may contain. It is appended to the tool's
+	// description.
+	QuerySyntax() string
 }
 
 type Summary struct {

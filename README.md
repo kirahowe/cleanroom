@@ -336,7 +336,9 @@ start without its history.
   attacker-controlled text.
 - **Replay:** `explain` uses the current policy. It reports a mismatch if that
   policy produces a different decision from the recorded one.
-- **Mailpit:** reading a message marks it as read. An IMAP back end is planned.
+- **Mail:** reading a message through Mailpit marks it as read. The IMAP back
+  end leaves messages unread, reads one mailbox, and supports password login
+  only. See `sources/mail/README.md`.
 - **Log storage:** each decision reads the entire log. It has no checksum and
   cannot detect truncation at a line boundary or tampering by another process
   running as the same user. An unreadable or malformed log stops decisions.
@@ -357,7 +359,6 @@ Remaining work:
 - Approval through MCP elicitation.
 - MCP resources for proposals, answers and session state. Currently these use
   CLI commands and the `status` tool.
-- An IMAP mail back end, using the existing `Mailbox` interface.
 - An approval web page.
 
 A shared, long-running server is deferred. Each stdio process currently serves

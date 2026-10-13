@@ -95,6 +95,10 @@ func (m *mailpit) Search(ctx context.Context, query string, limit int) ([]Summar
 	return out, nil
 }
 
+func (m *mailpit) QuerySyntax() string {
+	return "Mailpit filters such as from:, to:, subject: and is:unread also work."
+}
+
 // Read fetches one message. Mailpit marks a message read when it is fetched
 // by ID; see the README.
 func (m *mailpit) Read(ctx context.Context, id string) (Message, error) {

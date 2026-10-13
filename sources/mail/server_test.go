@@ -30,6 +30,8 @@ func (f *fakeMailbox) Read(_ context.Context, id string) (Message, error) {
 	return Message{ID: id, From: "ann@example.com", Subject: "Hi", Text: "body"}, nil
 }
 
+func (f *fakeMailbox) QuerySyntax() string { return "Filters: fake:." }
+
 func connect(t *testing.T, mb Mailbox) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
@@ -89,6 +91,9 @@ func TestToolList(t *testing.T) {
 		a := tool.Annotations
 		if tool.Description == "" {
 			t.Errorf("%s: no description", tool.Name)
+		}
+		if tool.Name == "search" && !strings.Contains(tool.Description, "Filters: fake:.") {
+			t.Errorf("search does not describe the back end's query syntax: %q", tool.Description)
 		}
 		if a.ReadOnlyHint != *w.readOnly {
 			t.Errorf("%s: readOnlyHint = %v", tool.Name, a.ReadOnlyHint)

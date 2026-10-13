@@ -16,7 +16,7 @@ const (
 )
 
 type searchInput struct {
-	Query string `json:"query" jsonschema:"search text; Mailpit filters such as from:, to:, subject: and is:unread also work"`
+	Query string `json:"query" jsonschema:"search text; the tool description says which filters work"`
 	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of results, 1 to 50 (default 20)"`
 }
 
@@ -39,7 +39,7 @@ func newServer(mailbox Mailbox) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "mail-source", Version: "0.1.0"}, nil)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "search",
-		Description: "Search the mailbox. Returns message summaries, newest first.",
+		Description: "Search the mailbox. Returns message summaries, newest first. " + mailbox.QuerySyntax(),
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, t.search)
 	mcp.AddTool(s, &mcp.Tool{
