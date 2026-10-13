@@ -110,7 +110,7 @@ func showCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		cfg := st.cfg
 		if screen, err := approval.Screen(cfg.Policy, events, seq); err == nil {
 			fmt.Fprint(c.stdout, screen)
-			fmt.Fprintf(c.stdout, "\nTo decide: cleanroom approve %d, or cleanroom deny %d\n", seq, seq)
+			fmt.Fprintf(c.stdout, "\nTo decide: cleanroom approve%[2]s %[1]d, or cleanroom deny%[2]s %[1]d\n", seq, c.hintFlags())
 			return nil
 		}
 		screen, err := approval.AnswerScreen(events, seq)

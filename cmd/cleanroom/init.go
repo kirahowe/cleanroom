@@ -85,13 +85,13 @@ func starterPolicy(s starter) string {
 `
 }
 
-func initReport(policyPath, passwordFile, check string) string {
+func initReport(policyPath, passwordFile, check, flags string) string {
 	return check + "\n\n" +
 		"Wrote " + policyPath + "\n" +
 		"Wrote " + passwordFile + " (only you can read it)\n\n" +
 		"Ask your mail something:\n\n" +
-		"    cleanroom ask \"When is my next dentist appointment?\"\n" +
-		"    cleanroom ask --returns date \"When is my next dentist appointment?\"\n"
+		"    cleanroom ask" + flags + " \"When is my next dentist appointment?\"\n" +
+		"    cleanroom ask" + flags + " --returns date \"When is my next dentist appointment?\"\n"
 }
 
 // initCommand sets cleanroom up for one IMAP mailbox. It asks for the user
@@ -174,7 +174,7 @@ func initCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		if err := writePrivate(policyPath, starterPolicy(s)); err != nil {
 			return err
 		}
-		fmt.Fprint(c.stdout, initReport(policyPath, s.passwordFile, strings.TrimSpace(string(check))))
+		fmt.Fprint(c.stdout, initReport(policyPath, s.passwordFile, strings.TrimSpace(string(check)), c.hintFlags()))
 		return nil
 	}
 }

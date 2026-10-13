@@ -169,8 +169,8 @@ func (g *Gateway) Ask(ctx context.Context, source, question string, returns json
 		g.needsPerson(Notice{Kind: AnswerWaiting, Seq: seq})
 		res.Status = DeliveredToUser
 		res.Note = fmt.Sprintf("The answer is free text from an untrusted source, so it went to the user, not to you. "+
-			"They can read it with: cleanroom show %d. Tell them it is there. "+
-			"To read it yourself, call read_answer with accept_contamination: true, which contaminates this session.", seq)
+			"They can read it with: cleanroom show%s %d. Tell them it is there. "+
+			"To read it yourself, call read_answer with accept_contamination: true, which contaminates this session.", g.Flags, seq)
 	case !core.MayRelease(asked, ans):
 		res.Status = NoAnswer
 		res.Note = "The source changed while the reader was working. Ask again."

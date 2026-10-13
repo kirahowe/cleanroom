@@ -139,6 +139,15 @@ func (c *common) resolvedPolicyPath() (string, error) {
 	return filepath.Abs(c.policyPath)
 }
 
+// stateDirFor is the absolute state directory for a policy in policyDir.
+func (c *common) stateDirFor(policyDir string) (string, error) {
+	dir := c.stateDir
+	if dir == "" {
+		dir = filepath.Join(policyDir, ".cleanroom")
+	}
+	return filepath.Abs(dir)
+}
+
 // open loads the policy and opens the log. The state directory defaults to
 // .cleanroom next to the policy file.
 func (c *common) open() (*state, error) {
@@ -156,11 +165,8 @@ func (c *common) open() (*state, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := c.stateDir
-	if dir == "" {
-		dir = filepath.Join(cfg.Dir, ".cleanroom")
-	}
-	if dir, err = filepath.Abs(dir); err != nil {
+	dir, err := c.stateDirFor(cfg.Dir)
+	if err != nil {
 		return nil, err
 	}
 	elog, err := eventlog.Open(dir)

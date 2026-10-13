@@ -176,9 +176,9 @@ func (g *Gateway) heldResult(seq int, d core.Decision) *mcp.CallToolResult {
 	reasons := g.explain(d)
 	text := fmt.Sprintf(`HELD: this call has not run. It is waiting for the user as proposal %d.
 Why: %s
-The user decides outside this conversation, with: cleanroom approve %d (or deny %d).
+The user decides outside this conversation, with: cleanroom approve%[3]s %[1]d (or cleanroom deny%[3]s %[1]d).
 Call status to see the outcome. Do not retry: a retry would only be held again.`,
-		seq, strings.Join(reasons, " "), seq, seq)
+		seq, strings.Join(reasons, " "), g.Flags)
 	return textResult(text, Held{Status: "held", Proposal: seq, Reasons: reasons})
 }
 

@@ -154,13 +154,7 @@ func claudeSettingsText(readerTools, serve []string) string {
 }
 
 func resumeHint(id, policyFlag, stateFlag string) string {
-	command := "cleanroom claude --resume " + id
-	if policyFlag != "" {
-		command += " --policy " + policyFlag
-	}
-	if stateFlag != "" {
-		command += " --state " + stateFlag
-	}
+	command := "cleanroom claude --resume " + id + locationFlags(policyFlag, stateFlag)
 	return "\nTo continue this conversation with cleanroom still in place:\n\n    " + command + "\n\n" +
 		"Do not use \"claude --resume\" for it. That would bring the conversation back\n" +
 		"with Claude Code's own tools, outside cleanroom's rules.\n"

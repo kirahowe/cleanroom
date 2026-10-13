@@ -84,7 +84,8 @@ func (c *common) gateway(session string) (*gateway.Gateway, func(), error) {
 	g := &gateway.Gateway{
 		Policy: cfg.Policy, Log: st.log, Session: session,
 		Upstreams: upstreams, Readers: readers,
-		Logf: log.Printf,
+		Flags: c.hintFlags(),
+		Logf:  log.Printf,
 	}
 	return g, func() { upstreams.Close(); children.Close() }, nil
 }

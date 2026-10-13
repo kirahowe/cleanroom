@@ -78,9 +78,13 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			fmt.Fprint(c.stdout, notLoggedInHelp(claudeConfigDir()))
 			return nil
 		}
-		fmt.Fprintf(c.stdout, "\nTo review reader logs: cleanroom log\n")
+		fmt.Fprintf(c.stdout, "\nTo review reader logs: cleanroom log%s\n", c.hintFlags())
 		if ok && ans.Outcome == core.OutcomeNone && strings.HasPrefix(ans.Detail, "the reader failed") {
-			fmt.Fprint(c.stdout, readerFailedHelp)
+			children, err := c.childLogPath()
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(c.stdout, readerFailedHelp(children))
 		}
 		if ok && ans.Outcome == core.OutcomeText {
 			desk := &approval.Desk{Policy: g.Policy, Log: g.Log}
@@ -91,10 +95,9 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 }
 
 // readerFailedHelp is for a failure the reader gave no reason for.
-const readerFailedHelp = `
-The reader did not finish. Its own messages are in children.log, in the state
-directory beside the policy.
-`
+func readerFailedHelp(childLog string) string {
+	return "\nThe reader did not finish. Its own messages are in\n" + childLog + "\n"
+}
 
 // returnsSpec turns the --returns flag into the JSON the ask takes. A bare
 // word such as date is a type name. Anything that starts like JSON is

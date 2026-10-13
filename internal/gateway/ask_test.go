@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -112,6 +113,9 @@ func TestFreeTextIsDeliveredToThePerson(t *testing.T) {
 	}
 	if diff := cmp.Diff([]Notice{{Kind: AnswerWaiting, Seq: res.ID}}, w.noticed()); diff != "" {
 		t.Errorf("notices (-want +got):\n%s", diff)
+	}
+	if want := fmt.Sprintf("cleanroom show --policy /p.jsonc %d.", res.ID); !strings.Contains(res.Note, want) {
+		t.Errorf("the note does not name the command for this policy, want %q in:\n%s", want, res.Note)
 	}
 }
 

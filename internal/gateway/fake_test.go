@@ -101,6 +101,7 @@ func newWorld(t *testing.T) *world {
 		Policy:    w.policy,
 		Log:       newLog(t),
 		Upstreams: upstream.New(w.policy, mcptest.Dialer(t, w.fakes)),
+		Flags:     " --policy /p.jsonc",
 		Notify: func(n Notice) {
 			w.mu.Lock()
 			defer w.mu.Unlock()

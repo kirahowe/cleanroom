@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -64,6 +65,9 @@ func TestDirectReadContaminatesAndLaterActsAreHeld(t *testing.T) {
 	}
 	if !strings.Contains(text(res), "called mail.search") {
 		t.Errorf("held text does not cite what contaminated the session:\n%s", text(res))
+	}
+	if want := fmt.Sprintf("cleanroom approve --policy /p.jsonc %[1]d (or cleanroom deny --policy /p.jsonc %[1]d)", held.Proposal); !strings.Contains(text(res), want) {
+		t.Errorf("held text does not name the commands for this policy, want %q in:\n%s", want, text(res))
 	}
 	// The whole point: the upstream never saw the held call.
 	if seen := w.fakes["calendar"].Seen(); len(seen) != 0 {

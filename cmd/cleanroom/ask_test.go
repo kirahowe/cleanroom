@@ -72,8 +72,21 @@ func TestReturnsSpec(t *testing.T) {
 func TestAskExplainsAFailedReader(t *testing.T) {
 	policy := readerPolicy(t, `"false"`)
 	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
-	if !ok || !strings.Contains(out, "No answer") || !strings.Contains(out, "children.log") {
-		t.Errorf("got %v:\n%s", ok, out)
+	// The hints name this policy and the log that belongs to it, so they
+	// hold for a policy that is not at the default path.
+	for _, want := range []string{
+		"No answer",
+		filepath.Join(filepath.Dir(policy), ".cleanroom", "children.log") + "\n",
+		"cleanroom log --policy " + policy + "\n",
+	} {
+		if !ok || !strings.Contains(out, want) {
+			t.Errorf("got %v, want %q in:\n%s", ok, want, out)
+		}
+	}
+	state := t.TempDir()
+	out, _ = runCLI(t, true, "", "ask", "--policy", policy, "--state", state, "--returns", "date", "When?")
+	if want := filepath.Join(state, "children.log") + "\n"; !strings.Contains(out, want) {
+		t.Errorf("with --state, want %q in:\n%s", want, out)
 	}
 	// An agent is told only that there is no answer.
 	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
