@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"cleanroom/internal/reader"
 	"cleanroom/internal/typed"
 )
 
@@ -236,6 +238,47 @@ func TestSystemPrompt(t *testing.T) {
 	for _, want := range []string{`"mail"`, "Monday, October 12, 2026", "untrusted", "null"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}
+
+// Claude Code ends a session it could not log in for with an error result
+// and status 1. The outputs are the ones version 2.1.296 printed.
+func TestRunWhenNotLoggedIn(t *testing.T) {
+	for name, output := range map[string]string{
+		"never logged in": `{"type":"result","subtype":"success","is_error":true,"num_turns":1,"terminal_reason":"api_error","result":"Not logged in · Please run /login"}`,
+		"login expired":   `{"type":"result","subtype":"success","is_error":true,"num_turns":1,"terminal_reason":"api_error","result":"Failed to authenticate: OAuth session expired and could not be refreshed"}`,
+	} {
+		claude := fakeClaude(t, t.TempDir(), output, 1)
+		answer, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now())
+		if !errors.Is(err, errNotLoggedIn) {
+			t.Errorf("%s: got %s, %v", name, answer, err)
+		}
+	}
+
+	// Another API error, or an answer that only says so, is not a login
+	// problem.
+	for name, output := range map[string]string{
+		"overloaded":   `{"subtype":"success","is_error":true,"terminal_reason":"api_error","result":"API Error: 529 Overloaded"}`,
+		"model's text": `{"subtype":"success","is_error":false,"terminal_reason":"completed","result":"Not logged in · Please run /login"}`,
+	} {
+		claude := fakeClaude(t, t.TempDir(), output, 1)
+		if _, _, err := run(context.Background(), claude, "opus", mcpConfig(t, oneServer), "q", `"date"`, time.Now()); err == nil || errors.Is(err, errNotLoggedIn) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+}
+
+// cleanroom tells the person the cause only when the reader exits with the
+// status that stands for it.
+func TestExitStatus(t *testing.T) {
+	for want, err := range map[int]error{
+		reader.ExitToolsBlocked: fmt.Errorf("%w.\nhelp", errToolsBlocked),
+		reader.ExitNotLoggedIn:  errNotLoggedIn,
+		1:                       errors.New("the session ended without a structured answer"),
+	} {
+		if got := exitStatus(err); got != want {
+			t.Errorf("exitStatus(%v) = %d, want %d", err, got, want)
 		}
 	}
 }

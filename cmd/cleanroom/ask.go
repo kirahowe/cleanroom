@@ -74,7 +74,11 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 			fmt.Fprint(c.stdout, toolsBlockedHelp([]string{self, "reader-tools"}, allowlistFile(claudeSettingsFiles())))
 			return nil
 		}
-		fmt.Fprintf(c.stdout, "\nWhat the reader did: cleanroom log\n")
+		if ok && ans.Outcome == core.OutcomeNone && ans.Detail == reader.ErrNotLoggedIn.Error() {
+			fmt.Fprint(c.stdout, notLoggedInHelp(claudeConfigDir()))
+			return nil
+		}
+		fmt.Fprintf(c.stdout, "\nTo review reader logs: cleanroom log\n")
 		if ok && ans.Outcome == core.OutcomeNone && strings.HasPrefix(ans.Detail, "the reader failed") {
 			fmt.Fprint(c.stdout, readerFailedHelp)
 		}

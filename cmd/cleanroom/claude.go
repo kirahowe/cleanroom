@@ -170,19 +170,42 @@ func newUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// claudeConfigDir is the directory where Claude Code keeps the user's
+// settings and login, or "" when there is no home directory to find it in.
+func claudeConfigDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// notLoggedInHelp tells a person whose reader could not log in where Claude
+// Code looked for the login. A reader command that moves Claude Code's
+// directory itself is not accounted for.
+func notLoggedInHelp(dir string) string {
+	where := "its config directory"
+	if dir != "" {
+		where = dir
+	}
+	return "\nClaude Code is not logged in, or its login has expired, so the reader could not\n" +
+		"ask its model. Nothing was read. The reader's session looks for a login in\n" + where + ".\n\n" +
+		"To log in there, run \"claude\" and then /login. If your login is in another\n" +
+		"directory, set CLAUDE_CONFIG_DIR to it when you run cleanroom. Then ask again.\n"
+}
+
 // claudeSettingsFiles lists the settings files Claude Code reads for a
 // session started outside any project, as the reader's is: the user's, then
 // the one an administrator manages. CLAUDE_CONFIG_DIR is Claude Code's own
 // variable for moving the user's directory, and the reader's session
 // inherits it.
 func claudeSettingsFiles() []string {
-	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	dir := claudeConfigDir()
 	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil
-		}
-		dir = filepath.Join(home, ".claude")
+		return nil
 	}
 	managed := "/etc/claude-code/managed-settings.json"
 	if runtime.GOOS == "darwin" {

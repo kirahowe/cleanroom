@@ -81,6 +81,15 @@ const ExitToolsBlocked = 78
 // ExitToolsBlocked.
 var ErrToolsBlocked = errors.New("the reader could not start its tools")
 
+// ExitNotLoggedIn is the status a reader exits with when the model it asks
+// would not accept its login, so that it never got to read. Like
+// ExitToolsBlocked, it earns the person a hint that cleanroom wrote.
+const ExitNotLoggedIn = 77
+
+// ErrNotLoggedIn is what Answer returns for a reader that exited with
+// ExitNotLoggedIn.
+var ErrNotLoggedIn = errors.New("the reader is not logged in to its model")
+
 // Answer runs the command and returns the answer it printed.
 func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 	tmp, err := os.MkdirTemp("", "cleanroom-reader-")
@@ -141,8 +150,13 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 			return nil, errors.New("the reader ran out of time")
 		}
 		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == ExitToolsBlocked {
-			return nil, ErrToolsBlocked
+		if errors.As(err, &exit) {
+			switch exit.ExitCode() {
+			case ExitToolsBlocked:
+				return nil, ErrToolsBlocked
+			case ExitNotLoggedIn:
+				return nil, ErrNotLoggedIn
+			}
 		}
 		return nil, fmt.Errorf("the reader failed: %w", err)
 	}

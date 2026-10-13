@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -195,10 +196,16 @@ func TestCommandFailures(t *testing.T) {
 	}
 }
 
-func TestCommandReportsBlockedTools(t *testing.T) {
-	c := &Command{Argv: []string{script(t, `exit 78`)}, Pipe: []string{"x"}}
-	if _, err := c.Answer(context.Background(), Job{Ask: 1, Source: "mail"}); !errors.Is(err, ErrToolsBlocked) {
-		t.Errorf("Answer failed with %v, want ErrToolsBlocked", err)
+// A reader names a cause it knows by its exit status.
+func TestCommandReportsKnownCauses(t *testing.T) {
+	for status, want := range map[int]error{
+		ExitToolsBlocked: ErrToolsBlocked,
+		ExitNotLoggedIn:  ErrNotLoggedIn,
+	} {
+		c := &Command{Argv: []string{script(t, fmt.Sprintf(`exit %d`, status))}, Pipe: []string{"x"}}
+		if _, err := c.Answer(context.Background(), Job{Ask: 1, Source: "mail"}); !errors.Is(err, want) {
+			t.Errorf("exit %d: Answer failed with %v, want %v", status, err, want)
+		}
 	}
 }
 

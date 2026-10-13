@@ -56,14 +56,24 @@ func main() {
 	if report != "" {
 		log.Print(report)
 	}
-	if errors.Is(err, errToolsBlocked) {
-		log.Print(err)
-		os.Exit(reader.ExitToolsBlocked)
-	}
 	if err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		os.Exit(exitStatus(err))
 	}
 	fmt.Println(string(answer))
+}
+
+// exitStatus is the status the reader exits with after err. A cause that
+// cleanroom can explain to the person has a status of its own, because the
+// status is all of a reader's failure that cleanroom shows anyone.
+func exitStatus(err error) int {
+	switch {
+	case errors.Is(err, errToolsBlocked):
+		return reader.ExitToolsBlocked
+	case errors.Is(err, errNotLoggedIn):
+		return reader.ExitNotLoggedIn
+	}
+	return 1
 }
 
 // run asks the model and returns the line to print. The report is a line
@@ -121,6 +131,9 @@ func run(ctx context.Context, claude, model, configPath, question, returns strin
 		return nil, "", parseErr
 	}
 	report = fmt.Sprintf("%s, %d turns, %.1fs, $%.4f", result.Subtype, result.Turns, float64(result.DurationMS)/1000, result.CostUSD)
+	if result.notLoggedIn() {
+		return nil, report, errNotLoggedIn
+	}
 	if result.IsError || result.Output == nil {
 		return nil, report, errors.New("the session ended without a structured answer")
 	}
@@ -166,14 +179,28 @@ func sourceServer(configPath string) (source string, server json.RawMessage, err
 
 // result is the part of Claude Code's --output-format json that is used.
 type result struct {
-	Subtype    string  `json:"subtype"`
-	IsError    bool    `json:"is_error"`
-	Turns      int     `json:"num_turns"`
-	DurationMS int     `json:"duration_ms"`
-	CostUSD    float64 `json:"total_cost_usd"`
-	Output     *struct {
+	Subtype        string  `json:"subtype"`
+	IsError        bool    `json:"is_error"`
+	TerminalReason string  `json:"terminal_reason"`
+	Result         string  `json:"result"`
+	Turns          int     `json:"num_turns"`
+	DurationMS     int     `json:"duration_ms"`
+	CostUSD        float64 `json:"total_cost_usd"`
+	Output         *struct {
 		Answer json.RawMessage `json:"answer"`
 	} `json:"structured_output"`
+}
+
+var errNotLoggedIn = errors.New("Claude Code is not logged in, or its login has expired")
+
+// notLoggedIn reports whether the session ended because Anthropic refused
+// the login. Claude Code 2.1 has no field for this. It ends such a session
+// with an API error whose text is one of the two matched here: the first
+// for a config directory that was never logged in, the second for a login
+// that expired.
+func (r result) notLoggedIn() bool {
+	return r.IsError && r.TerminalReason == "api_error" &&
+		(strings.HasPrefix(r.Result, "Not logged in") || strings.HasPrefix(r.Result, "Failed to authenticate"))
 }
 
 func parseResult(stdout []byte) (result, error) {

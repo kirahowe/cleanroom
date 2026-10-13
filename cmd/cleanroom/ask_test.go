@@ -119,6 +119,47 @@ func TestAskExplainsBlockedTools(t *testing.T) {
 	}
 }
 
+// A reader that could not log in to its model says so by its exit status.
+// The person is shown where Claude Code looked for the login.
+func TestAskExplainsAMissingLogin(t *testing.T) {
+	policy := readerPolicy(t, `"sh", "-c", "exit 77"`)
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+
+	out, ok := runCLI(t, true, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	for _, want := range []string{
+		"No answer: the reader is not logged in to its model.",
+		"looks for a login in\n" + configDir + ".",
+		"/login",
+	} {
+		if !ok || !strings.Contains(out, want) {
+			t.Errorf("got %v, want %q in:\n%s", ok, want, out)
+		}
+	}
+	if strings.Contains(out, "children.log") {
+		t.Errorf("sent the person to the reader's log for a cause that is known:\n%s", out)
+	}
+
+	out, _ = runCLI(t, false, "", "ask", "--policy", policy, "--returns", "date", "When?")
+	if strings.Contains(out, "/login") || !strings.Contains(out, `"status": "no_answer"`) {
+		t.Errorf("without a terminal:\n%s", out)
+	}
+}
+
+// Without CLAUDE_CONFIG_DIR the login is under the home directory.
+func TestClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if got, want := claudeConfigDir(), filepath.Join(home, ".claude"); got != want {
+		t.Errorf("claudeConfigDir() = %q, want %q", got, want)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "/elsewhere")
+	if got := claudeConfigDir(); got != "/elsewhere" {
+		t.Errorf("claudeConfigDir() = %q with CLAUDE_CONFIG_DIR set", got)
+	}
+}
+
 func TestAllowlistFile(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) string {

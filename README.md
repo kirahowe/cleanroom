@@ -163,9 +163,10 @@ the reader to one source through `cleanroom reader-tools` and a temporary Unix
 socket, whose path is in the server's `env` block. The gateway authorizes each call and reuses its upstream connections.
 The socket closes when the question finishes.
 
-A reader whose MCP client refuses to start that server exits with status 78.
-Cleanroom shows nobody what a reader writes, so the status is how `ask` learns
-the cause and can tell the person what to allow.
+A reader whose MCP client refuses to start that server exits with status 78,
+and one whose model refuses its login exits with status 77. Cleanroom shows
+nobody what a reader writes, so the status is how `ask` learns the cause and
+can tell the person what to allow or where to log in.
 
 The demo reader in `demo/reader` uses keywords and regular expressions and
 knows only the demo's questions.
