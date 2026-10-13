@@ -10,6 +10,7 @@ import (
 
 	"cleanroom/internal/approval"
 	"cleanroom/internal/core"
+	"cleanroom/internal/gateway"
 	"cleanroom/internal/reader"
 )
 
@@ -27,7 +28,7 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 	return func(ctx context.Context) error {
 		question := strings.TrimSpace(strings.Join(fs.Args(), " "))
 		if question == "" {
-			return errors.New(`give the question, after any flags: cleanroom ask --returns date "When is the reunion?"`)
+			return errors.New(`give the question: cleanroom ask --returns date "When is the reunion?"`)
 		}
 		g, closeGateway, err := c.gateway("cli-" + newSessionID())
 		if err != nil {
@@ -41,6 +42,9 @@ func askCommand(fs *flag.FlagSet, c *common) func(context.Context) error {
 		}
 
 		if c.terminal {
+			// The answer is printed below, so a notice that it is
+			// waiting would only repeat it.
+			g.Notify = func(gateway.Notice) {}
 			fmt.Fprintf(c.stderr, "Asking %s. A reader is searching and reading; this can take a minute.\n", *source)
 		}
 		res, err := g.Ask(ctx, *source, question, returnsSpec(*returns), false)
