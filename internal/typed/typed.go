@@ -165,6 +165,21 @@ func CheckText(raw []byte) (string, bool) {
 	return s, true
 }
 
+// IsNull reports whether a reader's raw answer is JSON null, which is how a
+// reader says that it has no answer.
+func IsNull(raw []byte) bool {
+	v, ok := decode(raw)
+	return ok && v == nil
+}
+
+// TextTooLong reports whether CheckText turned a reader's answer down for
+// its length alone.
+func TextTooLong(raw []byte) bool {
+	v, _ := decode(raw)
+	s, ok := v.(string)
+	return ok && utf8.RuneCountInString(s) > MaxTextRunes
+}
+
 // decode parses exactly one JSON value, keeping numbers as their literal
 // text so that no float conversion can change them.
 func decode(raw []byte) (any, bool) {

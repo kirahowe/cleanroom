@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"cleanroom/internal/typed"
 )
 
 // testPolicy has one upstream of each kind the tests need.
@@ -737,6 +739,25 @@ func TestRefusalsRepeatNothingTheCallerWrote(t *testing.T) {
 		// the policy, which cannot be the marker.
 		if strings.Contains(shown, marker) {
 			t.Errorf("%+v\nshows the caller's text: %s", c, shown)
+		}
+	}
+}
+
+// The reason an ask came to nothing says which of the ways it was: the
+// reader had no answer, or it gave one that the check turned down.
+func TestConcludeSaysWhyThereIsNoAnswer(t *testing.T) {
+	for _, tc := range []struct{ returns, raw, want string }{
+		{`"text"`, `null`, "the reader did not find one, or was not sure"},
+		{`"date"`, `null`, "the reader did not find one, or was not sure"},
+		{`"text"`, `"` + strings.Repeat("x", typed.MaxTextRunes+1) + `"`, "the reader's answer was longer than 4000 characters"},
+		{`"text"`, `42`, "the reader's answer was not usable text"},
+		{`"text"`, `""`, "the reader's answer was not usable text"},
+		{`"date"`, `"next Tuesday"`, "the reader's answer was not a valid date"},
+	} {
+		w := newWorld(t)
+		ask, _ := w.ask("chief", "inbox", tc.returns, false)
+		if ans := w.conclude(ask, tc.raw); ans.Outcome != OutcomeNone || ans.Detail != tc.want {
+			t.Errorf("%s answered with %.20s: outcome %s, detail %q, want %q", tc.returns, tc.raw, ans.Outcome, ans.Detail, tc.want)
 		}
 	}
 }

@@ -100,7 +100,12 @@ func (c *Command) Answer(ctx context.Context, job Job) ([]byte, error) {
 
 	server, err := toolServer(ctx, job.Tools)
 	if err != nil {
-		return nil, fmt.Errorf("listing the tools of %q: %w", job.Source, err)
+		// The error is the upstream's text. It goes to the log of what
+		// children write, and the answer's reason stays cleanroom's own.
+		if c.Logf != nil {
+			c.Logf("listing the tools of %q: %v", job.Source, err)
+		}
+		return nil, fmt.Errorf("the tools of %q could not be listed", job.Source)
 	}
 	// MkdirTemp made the directory for this user only, so only this user
 	// can connect.

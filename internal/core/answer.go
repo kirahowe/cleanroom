@@ -34,9 +34,13 @@ func Conclude(p Policy, log []Event, askSeq int, raw []byte, failure string) (Ev
 	switch {
 	case failure != "":
 		a.Detail = failure
+	case typed.IsNull(raw):
+		a.Detail = "the reader did not find one, or was not sure"
 	case spec.IsText():
 		if text, ok := typed.CheckText(raw); ok {
 			a.Outcome, a.Text = OutcomeText, text
+		} else if typed.TextTooLong(raw) {
+			a.Detail = fmt.Sprintf("the reader's answer was longer than %d characters", typed.MaxTextRunes)
 		} else {
 			a.Detail = "the reader's answer was not usable text"
 		}

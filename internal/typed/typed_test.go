@@ -210,3 +210,21 @@ func FuzzParseSpec(f *testing.F) {
 		}
 	})
 }
+
+func TestIsNullAndTextTooLong(t *testing.T) {
+	long := `"` + strings.Repeat("x", MaxTextRunes+1) + `"`
+	for raw, want := range map[string][2]bool{
+		`null`:           {true, false},
+		` null `:         {true, false},
+		`"null"`:         {false, false},
+		``:               {false, false},
+		`null 1`:         {false, false},
+		`"short"`:        {false, false},
+		long:             {false, true},
+		`[` + long + `]`: {false, false},
+	} {
+		if got := [2]bool{IsNull([]byte(raw)), TextTooLong([]byte(raw))}; got != want {
+			t.Errorf("%.20s: IsNull, TextTooLong = %v, want %v", raw, got, want)
+		}
+	}
+}

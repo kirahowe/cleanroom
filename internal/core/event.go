@@ -137,7 +137,9 @@ type Answer struct {
 	Text    string          `json:"text,omitempty"`  // for OutcomeText
 	Labels  Labels          `json:"labels"`
 	// Detail says why there was no answer. It is for the person and the
-	// log. The caller is told only that there is no answer.
+	// log. The caller is told only that there is no answer. cleanroom
+	// writes every word of it: a reader chooses which reason applies, and
+	// nothing it or the source wrote is quoted.
 	Detail string `json:"detail,omitempty"`
 }
 
